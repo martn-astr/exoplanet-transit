@@ -2,16 +2,84 @@
 
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
-from pht_app.data.fp_diagnostics import run_all_diagnostics
+from pht_app.data.fp_diagnostics import (
+    run_all_diagnostics, odd_even_folded_curves, secondary_zoom_curves,
+)
 from pht_app.data.tpf_centroid import (
-    download_tpf, build_difference_image, query_gaia_sources, centroid_shift_estimate,
+    download_tpf, build_difference_image, query_gaia_sources,
+    centroid_shift_estimate, centroid_offset_arcsec,
 )
 
 
 def _verdict_badge(likely_eb):
     return "🔴 FP indicator" if likely_eb else "🟢 Passes"
+
+
+def _render_odd_even_plot(lc, period, epoch, duration_days):
+    curves = odd_even_folded_curves(lc, period, epoch, duration_days)
+    if curves["status"] != "ok":
+        st.caption("Not enough odd/even transits in this baseline to plot a comparison.")
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=curves["phase_hours"], y=curves["odd_flux"],
+        mode="lines+markers", name="Odd transits",
+        line=dict(color="steelblue", width=2), marker=dict(size=4),
+    ))
+    fig.add_trace(go.Scatter(
+        x=curves["phase_hours"], y=curves["even_flux"],
+        mode="lines+markers", name="Even transits",
+        line=dict(color="darkorange", width=2), marker=dict(size=4),
+    ))
+    fig.update_layout(
+        title="Odd vs Even Transits (folded & binned)",
+        xaxis_title="Phase (hours)", yaxis_title="Relative flux",
+        height=320, margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    st.plotly_chart(fig, use_container_width=True, key="odd_even_plot")
+    st.caption("Mismatched depths between the two curves are the classic eclipsing-binary signature "
+               "(a blended EB at half the true period).")
+
+
+def _render_secondary_zoom_plot(lc, period, epoch, duration_days):
+    curves = secondary_zoom_curves(lc, period, epoch, duration_days)
+    if curves["status"] != "ok":
+        st.caption("Not enough phase coverage to plot the primary/secondary comparison.")
+        return
+
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("Primary (phase 0)", "Secondary (phase 0.5)"))
+    fig.add_trace(go.Scatter(
+        x=curves["primary"]["phase"], y=curves["primary"]["flux"],
+        mode="lines+markers", line=dict(color="steelblue", width=2), marker=dict(size=4),
+        showlegend=False,
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=curves["secondary"]["phase"], y=curves["secondary"]["flux"],
+        mode="lines+markers", line=dict(color="firebrick", width=2), marker=dict(size=4),
+        showlegend=False,
+    ), row=1, col=2)
+    fig.update_xaxes(title_text="Phase", row=1, col=1)
+    fig.update_xaxes(title_text="Phase", row=1, col=2)
+    fig.update_yaxes(title_text="Relative flux", row=1, col=1)
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=40, b=10),
+                       title_text="Primary vs Secondary Eclipse (zoomed, same flux scale)")
+    # Match y-axis ranges across both subplots so depth is visually comparable.
+    all_flux = np.concatenate([curves["primary"]["flux"], curves["secondary"]["flux"]])
+    finite = all_flux[np.isfinite(all_flux)]
+    if finite.size:
+        y_pad = 0.1 * (finite.max() - finite.min() + 1e-9)
+        y_range = [finite.min() - y_pad, finite.max() + y_pad]
+        fig.update_yaxes(range=y_range, row=1, col=1)
+        fig.update_yaxes(range=y_range, row=1, col=2)
+
+    st.plotly_chart(fig, use_container_width=True, key="secondary_zoom_plot")
+    st.caption("A visible dip in the right-hand (phase 0.5) panel at comparable depth to the left "
+               "is a secondary-eclipse detection — a strong eclipsing-binary indicator.")
 
 
 def render_fp_diagnostics_panel():
@@ -79,6 +147,14 @@ def render_fp_diagnostics_panel():
         else:
             st.caption(se["message"])
 
+    st.divider()
+
+    plot_col1, plot_col2 = st.columns(2)
+    with plot_col1:
+        _render_odd_even_plot(lc, period, epoch, duration_days)
+    with plot_col2:
+        _render_secondary_zoom_plot(lc, period, epoch, duration_days)
+
 
 def render_tpf_centroid_panel():
     st.subheader("📍 TPF Spatial Centroid Check")
@@ -130,49 +206,97 @@ def render_tpf_centroid_panel():
     if diff is None:
         return
 
-    fig = go.Figure(data=go.Heatmap(z=diff["diff_image"], colorscale="RdBu_r", colorbar=dict(title="Δ Flux")))
+    img_col, offset_col = st.columns(2)
 
-    centroid = st.session_state.centroid_result
-    if centroid:
-        fig.add_trace(go.Scatter(
-            x=[centroid["x"]], y=[centroid["y"]],
-            mode="markers", marker=dict(symbol="x", size=14, color="lime", line=dict(width=2)),
-            name="Difference centroid",
-        ))
+    with img_col:
+        fig = go.Figure(data=go.Heatmap(z=diff["diff_image"], colorscale="RdBu_r", colorbar=dict(title="Δ Flux")))
 
-    gaia = st.session_state.gaia_sources
-    if gaia is not None and len(gaia) > 0 and diff["wcs"] is not None:
-        try:
-            px, py = diff["wcs"].world_to_pixel_values(gaia["ra"].values, gaia["dec"].values)
+        centroid = st.session_state.centroid_result
+        if centroid:
             fig.add_trace(go.Scatter(
-                x=px, y=py, mode="markers",
-                marker=dict(symbol="circle-open", size=10, color="yellow", line=dict(width=1.5)),
-                name="Gaia DR3 sources",
-                text=[f"G={m:.2f}" for m in gaia["phot_g_mean_mag"].values],
+                x=[centroid["x"]], y=[centroid["y"]],
+                mode="markers", marker=dict(symbol="x", size=14, color="lime", line=dict(width=2)),
+                name="Difference centroid",
             ))
-        except Exception:
-            pass
 
-    fig.update_layout(
-        title="Difference image (out-of-transit − in-transit)",
-        height=420,
-        margin=dict(l=10, r=10, t=40, b=10),
-        yaxis=dict(scaleanchor="x"),
-    )
-    st.plotly_chart(fig, use_container_width=True, key="tpf_diff_chart")
+        gaia = st.session_state.gaia_sources
+        if gaia is not None and len(gaia) > 0 and diff["wcs"] is not None:
+            try:
+                px, py = diff["wcs"].world_to_pixel_values(gaia["ra"].values, gaia["dec"].values)
+                fig.add_trace(go.Scatter(
+                    x=px, y=py, mode="markers",
+                    marker=dict(symbol="circle-open", size=10, color="yellow", line=dict(width=1.5)),
+                    name="Gaia DR3 sources",
+                    text=[f"G={m:.2f}" for m in gaia["phot_g_mean_mag"].values],
+                ))
+            except Exception:
+                pass
 
-    if centroid:
-        if centroid["ra"] is not None:
-            st.write(
-                f"**Difference-image centroid:** RA={centroid['ra']:.5f}°, Dec={centroid['dec']:.5f}° "
-                f"— compare against the target's catalog position and any overlaid Gaia sources. "
-                f"A centroid that sits on top of a neighboring source (yellow circle) rather than "
-                f"the target indicates the eclipse likely originates from a blended background star."
-            )
+        fig.update_layout(
+            title="Difference image (out-of-transit − in-transit)",
+            height=420,
+            margin=dict(l=10, r=10, t=40, b=10),
+            yaxis=dict(scaleanchor="x"),
+        )
+        st.plotly_chart(fig, use_container_width=True, key="tpf_diff_chart")
+
+        if centroid:
+            if centroid["ra"] is not None:
+                st.write(
+                    f"**Difference-image centroid:** RA={centroid['ra']:.5f}°, Dec={centroid['dec']:.5f}° "
+                    f"— a centroid sitting on a neighboring source (yellow circle) rather than the target "
+                    f"indicates the eclipse likely originates from a blended background star."
+                )
+            else:
+                st.write(f"**Difference-image centroid (pixel coords):** x={centroid['x']:.2f}, y={centroid['y']:.2f}")
+
+        if gaia is None:
+            st.caption("Gaia DR3 query failed or returned no results (network-restricted environments may block this).")
+        elif len(gaia) == 0:
+            st.caption("No Gaia DR3 sources found within the search radius.")
+
+    with offset_col:
+        st.markdown("**TIC Position Centroid Offset**")
+        sp = st.session_state.stellar_params
+        centroid = st.session_state.centroid_result
+        offset = centroid_offset_arcsec(centroid, sp.get("ra"), sp.get("dec")) if sp else None
+
+        if offset is None:
+            st.caption("Offset requires a resolved WCS centroid and a valid target RA/Dec — "
+                       "run the difference image above first.")
         else:
-            st.write(f"**Difference-image centroid (pixel coords):** x={centroid['x']:.2f}, y={centroid['y']:.2f}")
-
-    if gaia is None:
-        st.caption("Gaia DR3 query failed or returned no results (network-restricted environments may block this).")
-    elif len(gaia) == 0:
-        st.caption("No Gaia DR3 sources found within the search radius.")
+            fig2 = go.Figure()
+            # Target position at the origin, matching the DV-report convention.
+            fig2.add_trace(go.Scatter(
+                x=[0], y=[0], mode="markers",
+                marker=dict(symbol="star", size=16, color="black"),
+                name="TIC catalog position",
+            ))
+            fig2.add_trace(go.Scatter(
+                x=[offset["d_ra_arcsec"]], y=[offset["d_dec_arcsec"]],
+                mode="markers", marker=dict(symbol="x", size=14, color="crimson", line=dict(width=2)),
+                name="Difference-image centroid",
+            ))
+            # A rough 1-pixel (~21") reference circle, TESS's approximate pixel scale,
+            # as a visual sense of scale rather than a formal uncertainty ellipse.
+            theta = np.linspace(0, 2 * np.pi, 100)
+            pixel_scale_arcsec = 21.0
+            fig2.add_trace(go.Scatter(
+                x=pixel_scale_arcsec * np.cos(theta), y=pixel_scale_arcsec * np.sin(theta),
+                mode="lines", line=dict(color="gray", dash="dot"),
+                name="~1 TESS pixel (21″)",
+            ))
+            fig2.update_layout(
+                xaxis_title="ΔRA (arcsec)", yaxis_title="ΔDec (arcsec)",
+                height=420, margin=dict(l=10, r=10, t=30, b=10),
+                yaxis=dict(scaleanchor="x"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            )
+            st.plotly_chart(fig2, use_container_width=True, key="centroid_offset_plot")
+            st.metric("Total offset", f"{offset['offset_arcsec']:.2f}″")
+            if offset["offset_arcsec"] > pixel_scale_arcsec:
+                st.warning("Centroid offset exceeds ~1 TESS pixel — signal may originate from a "
+                           "different (blended) source than the target.")
+            else:
+                st.success("Centroid offset is within ~1 TESS pixel of the target — consistent "
+                            "with the signal originating on-target.")

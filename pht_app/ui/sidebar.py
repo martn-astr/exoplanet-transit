@@ -13,9 +13,15 @@ def render_sidebar():
             "tic_input": str,
             "load_clicked": bool,
             "selected_sectors": list[int],
-            "export_csv": bool,
-            "export_pdf": bool,
+            "add_mask": bool,
+            "mask_period": float,
+            "mask_epoch": float,
         }
+
+    CSV/PDF export is handled entirely inside this function (via
+    st.download_button) since it needs direct access to session_state's
+    loaded light curve and analysis results — it isn't part of the returned
+    action dict.
     """
     with st.sidebar:
         st.header("🔭 Target Search")
@@ -106,13 +112,44 @@ def render_sidebar():
 
         st.divider()
         st.subheader("Export")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            export_csv = st.button("⬇ CSV", use_container_width=True,
-                                    disabled=st.session_state.stitched_lc is None)
-        with col_b:
-            export_pdf = st.button("⬇ PDF", use_container_width=True,
-                                    disabled=st.session_state.stitched_lc is None)
+
+        lc = st.session_state.stitched_lc
+        if lc is None:
+            st.caption("Load a stitched light curve first to enable exports.")
+        else:
+            from pht_app.export import build_csv_bytes, build_pdf_report_bytes
+
+            tic_id = st.session_state.tic_id or "unknown"
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                csv_bytes = build_csv_bytes(lc)
+                st.download_button(
+                    "⬇ CSV", data=csv_bytes,
+                    file_name=f"TIC_{tic_id}_lightcurve.csv", mime="text/csv",
+                    use_container_width=True,
+                )
+            with col_b:
+                if st.button("⬇ PDF", use_container_width=True):
+                    with st.spinner("Building PDF report..."):
+                        st.session_state.pdf_export_bytes = build_pdf_report_bytes(
+                            tic_id=tic_id,
+                            stellar_params=st.session_state.stellar_params,
+                            exofop_flags=st.session_state.exofop_flags,
+                            lc=lc,
+                            flux_column=st.session_state.flux_column,
+                            fold_period=st.session_state.fold_period,
+                            fold_epoch=st.session_state.fold_epoch,
+                            bls_result=st.session_state.bls_result,
+                            fp_result=st.session_state.fp_diagnostics_result,
+                        )
+
+            if st.session_state.get("pdf_export_bytes"):
+                st.download_button(
+                    "📄 Download PDF Report", data=st.session_state.pdf_export_bytes,
+                    file_name=f"TIC_{tic_id}_report.pdf", mime="application/pdf",
+                    use_container_width=True,
+                )
 
     return {
         "search_clicked": search_clicked,
@@ -122,6 +159,4 @@ def render_sidebar():
         "add_mask": add_mask,
         "mask_period": mask_period,
         "mask_epoch": mask_epoch,
-        "export_csv": export_csv,
-        "export_pdf": export_pdf,
     }

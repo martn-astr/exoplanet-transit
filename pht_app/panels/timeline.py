@@ -10,18 +10,38 @@ from pht_app.config import FLUX_COLUMNS
 def _flux_series(lc, flux_column):
     """
     Pull the requested flux column off a stitched light curve, falling back
-    to the default `flux` column if it isn't present.
+    to the default `flux` column point-by-point wherever the requested
+    column is missing/NaN.
+
+    This matters because FFI/QLP-derived sectors often don't carry a
+    separate sap_flux/pdcsap_flux column at all — after stitching, those
+    sectors' rows are simply NaN for that column. Without backfilling,
+    selecting PDCSAP_FLUX on a mixed SPOC+FFI target would only plot the
+    SPOC sector's points and silently drop the rest of the baseline.
 
     Note: lightkurve's PDCSAP_FLUX/SAP_FLUX convenience properties raise
-    KeyError (not AttributeError) when the underlying column is missing —
-    common for FFI/QLP-derived sectors that only carry a single flux column —
-    so hasattr() is not a safe way to probe for them. Check lc.colnames
+    KeyError (not AttributeError) when the underlying column is missing, so
+    hasattr() is not a safe way to probe for them — check lc.colnames
     (lowercased) directly instead.
+
+    Returns (flux_values, n_backfilled).
     """
     col_lower = flux_column.lower()
-    if col_lower in lc.colnames:
-        return np.asarray(lc[col_lower].value if hasattr(lc[col_lower], "value") else lc[col_lower])
-    return lc.flux.value
+    flux_fallback = lc.flux.value
+
+    if col_lower not in lc.colnames:
+        return flux_fallback, len(flux_fallback)
+
+    raw = lc[col_lower]
+    vals = np.asarray(raw.value if hasattr(raw, "value") else raw, dtype=float)
+
+    missing = ~np.isfinite(vals)
+    n_backfilled = int(missing.sum())
+    if n_backfilled:
+        vals = vals.copy()
+        vals[missing] = flux_fallback[missing]
+
+    return vals, n_backfilled
 
 
 def _available_flux_columns(lc, candidates):
@@ -55,7 +75,13 @@ def render_timeline_panel():
             st.caption("⚠ Some sectors (likely FFI/QLP) only provide a single flux column.")
 
     time_vals = lc.time.value
-    flux_vals = _flux_series(lc, flux_col)
+    flux_vals, n_backfilled = _flux_series(lc, flux_col)
+    if n_backfilled:
+        pct = 100.0 * n_backfilled / len(flux_vals)
+        st.caption(
+            f"ℹ {n_backfilled} point(s) ({pct:.0f}%) lack a {flux_col} value (likely FFI/QLP sectors) "
+            f"and are filled in from the normalized `flux` column so the baseline stays continuous."
+        )
 
     fig = go.Figure()
     fig.add_trace(go.Scattergl(
