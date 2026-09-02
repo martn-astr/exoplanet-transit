@@ -22,6 +22,10 @@ def run_bls(lc, min_period=0.5, max_period=20.0, n_periods=5000, duration_grid=N
     """
     Run a Box Least Squares search over the given light curve.
     Returns (periods, power, best_period, best_t0, best_duration).
+
+    BoxLeastSquares requires every trial duration to be strictly shorter than
+    the minimum trial period, so the duration grid is always clamped well
+    below min_period regardless of what's passed in.
     """
     time_vals = lc.time.value
     flux_vals = lc.flux.value
@@ -31,8 +35,16 @@ def run_bls(lc, min_period=0.5, max_period=20.0, n_periods=5000, duration_grid=N
     if len(time_vals) < 10:
         return None
 
+    # Cap the longest trial duration at 40% of the shortest trial period,
+    # so it's always safely below min_period no matter what was requested.
+    max_allowed_duration = min_period * 0.4
     if duration_grid is None:
-        duration_grid = np.linspace(0.02, 0.5, 10)  # days
+        duration_grid = np.linspace(0.01, max_allowed_duration, 10)
+    else:
+        duration_grid = np.asarray(duration_grid)
+        duration_grid = duration_grid[duration_grid < min_period]
+        if duration_grid.size == 0:
+            duration_grid = np.linspace(0.01, max_allowed_duration, 10)
 
     periods = np.linspace(min_period, max_period, n_periods)
     bls = BoxLeastSquares(time_vals, flux_vals)

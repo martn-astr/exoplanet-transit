@@ -8,11 +8,26 @@ from pht_app.config import FLUX_COLUMNS
 
 
 def _flux_series(lc, flux_column):
-    """Pull the requested flux column off a stitched light curve, falling back to default flux if missing."""
-    if hasattr(lc, flux_column):
-        col = getattr(lc, flux_column)
-        return col.value
+    """
+    Pull the requested flux column off a stitched light curve, falling back
+    to the default `flux` column if it isn't present.
+
+    Note: lightkurve's PDCSAP_FLUX/SAP_FLUX convenience properties raise
+    KeyError (not AttributeError) when the underlying column is missing —
+    common for FFI/QLP-derived sectors that only carry a single flux column —
+    so hasattr() is not a safe way to probe for them. Check lc.colnames
+    (lowercased) directly instead.
+    """
+    col_lower = flux_column.lower()
+    if col_lower in lc.colnames:
+        return np.asarray(lc[col_lower].value if hasattr(lc[col_lower], "value") else lc[col_lower])
     return lc.flux.value
+
+
+def _available_flux_columns(lc, candidates):
+    """Return only the flux columns actually present on this stitched light curve, plus a note if narrowed."""
+    present = [c for c in candidates if c.lower() in lc.colnames]
+    return present if present else ["flux"]
 
 
 def render_timeline_panel():
@@ -23,16 +38,21 @@ def render_timeline_panel():
         st.caption("Load a stitched light curve from the sidebar to see the timeline.")
         return
 
+    available_cols = _available_flux_columns(lc, FLUX_COLUMNS)
+
     col1, col2 = st.columns([3, 1])
     with col2:
         flux_col = st.selectbox(
             "Flux column",
-            options=FLUX_COLUMNS,
-            index=FLUX_COLUMNS.index(st.session_state.flux_column)
-            if st.session_state.flux_column in FLUX_COLUMNS else 0,
-            help="PDCSAP = systematics-removed. SAP = raw aperture photometry.",
+            options=available_cols,
+            index=available_cols.index(st.session_state.flux_column)
+            if st.session_state.flux_column in available_cols else 0,
+            help="PDCSAP = systematics-removed. SAP = raw aperture photometry. "
+                 "Only columns present in this stitched light curve are shown.",
         )
         st.session_state.flux_column = flux_col
+        if len(available_cols) < len(FLUX_COLUMNS):
+            st.caption("⚠ Some sectors (likely FFI/QLP) only provide a single flux column.")
 
     time_vals = lc.time.value
     flux_vals = _flux_series(lc, flux_col)
