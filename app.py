@@ -88,30 +88,43 @@ render_header()
 st.divider()
 
 # --------------------------------------------------------------------------
-# Synchronized 3-panel dashboard
+# Synchronized dashboard — laid out so more than one panel is visible at
+# once instead of a single long vertical scroll:
+#   Row 1: Timeline (full width — the shared zoom/selection source)
+#   Row 2: Phase-fold | Periodogram, side by side
 # --------------------------------------------------------------------------
 render_timeline_panel()
-render_phasefold_panel()
-render_periodogram_panel()
+
+fold_col, periodogram_col = st.columns(2)
+with fold_col:
+    render_phasefold_panel()
+with periodogram_col:
+    render_periodogram_panel()
 
 st.divider()
 
 # --------------------------------------------------------------------------
-# Step 3 — deterministic single-transit estimator
+# Analysis tools — separated into their own tabs so each is a clean, fully
+# visible panel rather than everything stacked one below the other.
 # --------------------------------------------------------------------------
-render_single_transit_panel()
-st.divider()
+tab_single_transit, tab_fp, tab_tpf = st.tabs([
+    "🎯 Single-Transit Estimator",
+    "🕵️ False Positive Diagnostics",
+    "📍 TPF Centroid Check",
+])
 
-# --------------------------------------------------------------------------
-# Step 4 — false positive diagnostics + TPF centroid check
-# --------------------------------------------------------------------------
-render_fp_diagnostics_panel()
-st.divider()
-render_tpf_centroid_panel()
+with tab_single_transit:
+    render_single_transit_panel()
+
+with tab_fp:
+    render_fp_diagnostics_panel()
+
+with tab_tpf:
+    render_tpf_centroid_panel()
 
 st.divider()
 st.caption(
     "PHT Candidate Validator — all 4 build steps complete: multi-sector download/stitch, "
-    "synchronized 3-panel dashboard, deterministic Keplerian single-transit estimator with "
+    "synchronized dashboard, deterministic Keplerian single-transit estimator with "
     "signal masking, and False Positive diagnostics with TPF centroid vetting."
 )
