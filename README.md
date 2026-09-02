@@ -1,5 +1,5 @@
 # PHT Candidate Validator
-
+# W.I.P. (Work In Progress)
 A Streamlit application for validating exoplanet candidates and variable
 stars from the **Planet Hunters TESS (PHT)** citizen-science project.
 Pulls multi-sector TESS light curves, stitches them, and runs deterministic
