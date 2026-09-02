@@ -35,6 +35,9 @@ def run_bls(lc, min_period=0.5, max_period=20.0, n_periods=5000, duration_grid=N
     if len(time_vals) < 10:
         return None
 
+    if max_period <= min_period:
+        max_period = min_period + 1.0
+
     # Cap the longest trial duration at 40% of the shortest trial period,
     # so it's always safely below min_period no matter what was requested.
     max_allowed_duration = min_period * 0.4
@@ -70,6 +73,9 @@ def run_lomb_scargle(lc, min_period=0.1, max_period=27.0, n_periods=5000):
 
     if len(time_vals) < 10:
         return None
+
+    if max_period <= min_period:
+        max_period = min_period + 1.0
 
     freq_min = 1.0 / max_period
     freq_max = 1.0 / min_period

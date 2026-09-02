@@ -1,11 +1,32 @@
 """Sector discovery and multi-sector light-curve download / normalization / stitching."""
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 import lightkurve as lk
 
 from pht_app.config import CACHE_TTL_SECONDS, SPOC_2MIN_LABEL, FFI_FALLBACK_AUTHORS
 from pht_app.data.lookup import clean_tic_id
+
+
+def _safe_int(value, default):
+    """Coerce a possibly-missing/NA value (pandas NA, NaN, None) to int, or return default."""
+    if value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default=None):
+    """Coerce a possibly-missing/NA value to float, or return default."""
+    if value is None or pd.isna(value):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
@@ -24,10 +45,14 @@ def search_available_sectors(tic_id: str):
     table = search_result.table.to_pandas()
     sectors = {}
     for _, row in table.iterrows():
-        sector = int(row.get("sequence_number", -1))
+        sector = _safe_int(row.get("sequence_number"), -1)
+        if sector == -1:
+            # No usable sector number for this product row — skip rather than
+            # collapsing every unresolvable row into a fake "sector -1" bucket.
+            continue
         author = str(row.get("author", "unknown"))
-        exptime = row.get("exptime", None)
-        is_2min = author == "SPOC" and exptime is not None and float(exptime) <= 200
+        exptime = _safe_float(row.get("exptime"))
+        is_2min = author == "SPOC" and exptime is not None and exptime <= 200
 
         entry = sectors.setdefault(sector, {
             "sector": sector,

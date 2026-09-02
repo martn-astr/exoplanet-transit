@@ -35,7 +35,16 @@ def render_periodogram_panel():
                        index=0 if st.session_state.periodogram_method == "BLS" else 1)
     st.session_state.periodogram_method = method
     min_p = c2.number_input("Min period (days)", min_value=0.05, value=0.5, step=0.1)
-    max_p = c3.number_input("Max period (days)", min_value=0.5, value=20.0, step=0.5)
+    max_p = c3.number_input("Max period (days)", min_value=0.1, value=20.0, step=0.5)
+
+    # Guard against an invalid period range instead of letting np.linspace /
+    # BoxLeastSquares crash on it.
+    if max_p <= min_p:
+        st.warning(
+            f"Max period ({max_p:g} d) must be greater than min period ({min_p:g} d) — "
+            f"adjusted max period to {min_p + 1:g} d for this run."
+        )
+        max_p = min_p + 1.0
 
     recompute = st.button("Recompute Periodogram", type="primary")
 
