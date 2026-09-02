@@ -40,14 +40,48 @@ def render_sidebar():
         st.subheader("Sectors")
         sector_checkboxes = {}
         if st.session_state.sector_list:
+            n_sectors = len(st.session_state.sector_list)
+            st.caption(f"{n_sectors} sector(s) available")
+
+            sel_a, sel_b = st.columns(2)
+            with sel_a:
+                select_all = st.button("Select all", use_container_width=True)
+            with sel_b:
+                select_none = st.button("Select none", use_container_width=True)
+
+            # Initialize / bulk-update the underlying checkbox state before the
+            # widgets are instantiated below, so the click takes effect this run.
             for s in st.session_state.sector_list:
-                tags = []
-                if s["has_2min_spoc"]:
-                    tags.append("2-min")
-                if s["has_ffi_fallback"]:
-                    tags.append("FFI")
-                label = f"Sector {s['sector']}  ({'/'.join(tags) if tags else 'unknown'})"
-                sector_checkboxes[s["sector"]] = st.checkbox(label, value=True, key=f"sector_{s['sector']}")
+                key = f"sector_{s['sector']}"
+                if select_all:
+                    st.session_state[key] = True
+                elif select_none:
+                    st.session_state[key] = False
+                elif key not in st.session_state:
+                    st.session_state[key] = True
+
+            # Compact grid (3 per row) inside a scrollable container so many
+            # sectors are visible at once instead of one-per-row scrolling.
+            with st.container(height=260, border=True):
+                n_cols = 3
+                cols = st.columns(n_cols)
+                for i, s in enumerate(st.session_state.sector_list):
+                    tags = []
+                    if s["has_2min_spoc"]:
+                        tags.append("2m")
+                    if s["has_ffi_fallback"]:
+                        tags.append("FFI")
+                    tag_str = "/".join(tags) if tags else "?"
+                    key = f"sector_{s['sector']}"
+                    with cols[i % n_cols]:
+                        sector_checkboxes[s["sector"]] = st.checkbox(
+                            f"S{s['sector']}",
+                            key=key,
+                            help=f"Sector {s['sector']} — {tag_str} — authors: {', '.join(s['authors'])}",
+                        )
+
+            n_selected = sum(sector_checkboxes.values())
+            st.caption(f"{n_selected} of {n_sectors} selected")
         else:
             st.caption("Search a target to list available sectors.")
 

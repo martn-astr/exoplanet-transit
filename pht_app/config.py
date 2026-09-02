@@ -56,10 +56,9 @@ SESSION_DEFAULTS = {
     "centroid_result": None,
 }
 
-# a
+
 def init_session_state(st):
     """Populate st.session_state with defaults for any missing keys."""
     for key, val in SESSION_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = val
-
