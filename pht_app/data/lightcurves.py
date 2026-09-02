@@ -109,13 +109,32 @@ def _download_one_sector(target: str, sector: int, prefer_source: str, logs: lis
 
 
 def _normalize(lc):
-    """Median-divide a light curve to a baseline flux of 1.0, dropping NaNs first."""
+    """
+    Median-divide a light curve to a baseline flux of 1.0, dropping NaNs first.
+    Also independently normalizes the raw sap_flux/pdcsap_flux columns (if
+    present) to their own per-sector baseline of 1.0 — otherwise those raw
+    columns stay at their original per-sector count scale (tens of thousands
+    of electrons/s, different per sector), which makes them effectively
+    unplottable once multiple sectors are stitched together.
+    """
     lc = lc.remove_nans()
     try:
         lc = lc.normalize()
     except Exception:
         median_flux = np.nanmedian(lc.flux.value)
         lc.flux = lc.flux / median_flux
+
+    for col in ("sap_flux", "pdcsap_flux"):
+        if col in lc.colnames:
+            try:
+                raw = lc[col]
+                raw_vals = raw.value if hasattr(raw, "value") else np.asarray(raw)
+                median = np.nanmedian(raw_vals)
+                if median and np.isfinite(median) and median != 0:
+                    lc[col] = raw / median
+            except Exception:
+                pass
+
     return lc
 
 

@@ -54,6 +54,9 @@ SESSION_DEFAULTS = {
     "tpf_diff_image": None,
     "gaia_sources": None,
     "centroid_result": None,
+
+    # Export (Step: CSV/PDF)
+    "pdf_export_bytes": None,
 }
 
 

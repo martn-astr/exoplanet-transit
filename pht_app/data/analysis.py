@@ -26,6 +26,14 @@ def run_bls(lc, min_period=0.5, max_period=20.0, n_periods=5000, duration_grid=N
     BoxLeastSquares requires every trial duration to be strictly shorter than
     the minimum trial period, so the duration grid is always clamped well
     below min_period regardless of what's passed in.
+
+    Uses BoxLeastSquares.autoperiod() to build the period grid rather than a
+    plain linear np.linspace. A uniform-in-period grid is too coarse at short
+    periods relative to the observing baseline and commonly locks onto a
+    harmonic/alias of the true period instead of the real signal (e.g.
+    reporting ~2.3 d when the true period is ~1.68 d); autoperiod() spaces
+    trial periods so the transit shape isn't under-sampled at any period in
+    range, which resolves this.
     """
     time_vals = lc.time.value
     flux_vals = lc.flux.value
@@ -49,8 +57,24 @@ def run_bls(lc, min_period=0.5, max_period=20.0, n_periods=5000, duration_grid=N
         if duration_grid.size == 0:
             duration_grid = np.linspace(0.01, max_allowed_duration, 10)
 
-    periods = np.linspace(min_period, max_period, n_periods)
     bls = BoxLeastSquares(time_vals, flux_vals)
+
+    try:
+        periods = bls.autoperiod(
+            duration_grid,
+            minimum_period=min_period,
+            maximum_period=max_period,
+            frequency_factor=5.0,  # denser than the default 1.0 for better short-period resolution
+        )
+        if len(periods) > 50000:
+            # autoperiod can generate an enormous grid for long baselines /
+            # short min_period; subsample down (preserving span) to stay fast.
+            idx = np.linspace(0, len(periods) - 1, 50000).astype(int)
+            periods = periods[idx]
+    except Exception:
+        # Fall back to a fine linear grid if autoperiod fails for any reason.
+        periods = np.linspace(min_period, max_period, max(n_periods, 20000))
+
     result = bls.power(periods, duration_grid)
 
     best_idx = np.argmax(result.power)

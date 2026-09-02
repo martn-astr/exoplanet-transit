@@ -19,6 +19,81 @@ import numpy as np
 from pht_app.data.analysis import phase_fold
 
 
+def odd_even_folded_curves(lc, period, epoch, duration_days, window_factor=3.0, n_bins=40):
+    """
+    Build binned, phase-folded curves for odd- and even-numbered transits
+    separately, zoomed to a window around the transit (± window_factor *
+    duration), for the classic side-by-side "odd vs even" visual comparison.
+
+    Returns dict with phase_bins and binned flux (+ error) arrays for each,
+    or a status flag if there isn't enough data.
+    """
+    time_vals = lc.time.value
+    flux_vals = lc.flux.value
+
+    transit_number = np.round((time_vals - epoch) / period)
+    phase_days = ((time_vals - epoch + 0.5 * period) % period) - 0.5 * period
+    half_window = duration_days * window_factor / 2.0
+    near_transit = np.abs(phase_days) <= half_window
+
+    odd_mask = near_transit & (transit_number % 2 != 0)
+    even_mask = near_transit & (transit_number % 2 == 0)
+
+    if odd_mask.sum() < 5 or even_mask.sum() < 5:
+        return {"status": "insufficient_data"}
+
+    bin_edges = np.linspace(-half_window, half_window, n_bins + 1)
+    bin_centers_hours = 0.5 * (bin_edges[:-1] + bin_edges[1:]) * 24.0
+
+    def _bin(mask):
+        means = np.full(n_bins, np.nan)
+        for i in range(n_bins):
+            sel = mask & (phase_days >= bin_edges[i]) & (phase_days < bin_edges[i + 1])
+            if sel.any():
+                means[i] = np.nanmean(flux_vals[sel])
+        return means
+
+    return {
+        "status": "ok",
+        "phase_hours": bin_centers_hours,
+        "odd_flux": _bin(odd_mask),
+        "even_flux": _bin(even_mask),
+    }
+
+
+def secondary_zoom_curves(lc, period, epoch, duration_days, window_factor=3.0, n_bins=60):
+    """
+    Build binned phase-folded curves zoomed on the primary transit (phase 0)
+    and on the expected secondary-eclipse location (phase 0.5) side by side,
+    for visual comparison of depth/presence of a secondary dip.
+    """
+    phase, flux, _ = phase_fold(lc, period, epoch)
+    half_window = (duration_days * window_factor / 2.0) / period  # in phase units
+
+    def _zoom(center_phase):
+        rel_phase = phase - center_phase
+        rel_phase = (rel_phase + 0.5) % 1.0 - 0.5  # wrap into [-0.5, 0.5)
+        near = np.abs(rel_phase) <= half_window
+        if near.sum() < 10:
+            return None
+        bin_edges = np.linspace(-half_window, half_window, n_bins + 1)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        means = np.full(n_bins, np.nan)
+        for i in range(n_bins):
+            sel = near & (rel_phase >= bin_edges[i]) & (rel_phase < bin_edges[i + 1])
+            if sel.any():
+                means[i] = np.nanmean(flux[sel])
+        return {"phase": bin_centers, "flux": means}
+
+    primary = _zoom(0.0)
+    secondary = _zoom(0.5)
+
+    if primary is None or secondary is None:
+        return {"status": "insufficient_data"}
+
+    return {"status": "ok", "primary": primary, "secondary": secondary}
+
+
 def odd_even_test(lc, period, epoch, duration_days, n_bins=20):
     """
     Compare the mean in-transit depth of odd-numbered vs even-numbered transits.

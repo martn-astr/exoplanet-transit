@@ -105,3 +105,28 @@ def centroid_shift_estimate(diff_image, wcs):
         return {"x": x_centroid, "y": y_centroid, "ra": sky.ra.deg, "dec": sky.dec.deg}
     except Exception:
         return {"x": x_centroid, "y": y_centroid, "ra": None, "dec": None}
+
+
+def centroid_offset_arcsec(centroid, target_ra_deg, target_dec_deg):
+    """
+    Offset of the difference-image centroid from the target's catalog
+    position, in RA/Dec arcsec — matching the classic DV-report "TIC
+    Position Centroid Offsets" plot. A large offset (well outside the
+    photocenter uncertainty) suggests the eclipse originates from a nearby
+    blended source rather than the target itself.
+    """
+    if centroid is None or centroid.get("ra") is None or target_ra_deg is None or target_dec_deg is None:
+        return None
+    if np.isnan(target_ra_deg) or np.isnan(target_dec_deg):
+        return None
+
+    dec_rad = np.radians(target_dec_deg)
+    d_ra_arcsec = (centroid["ra"] - target_ra_deg) * np.cos(dec_rad) * 3600.0
+    d_dec_arcsec = (centroid["dec"] - target_dec_deg) * 3600.0
+    offset_arcsec = float(np.hypot(d_ra_arcsec, d_dec_arcsec))
+
+    return {
+        "d_ra_arcsec": float(d_ra_arcsec),
+        "d_dec_arcsec": float(d_dec_arcsec),
+        "offset_arcsec": offset_arcsec,
+    }
