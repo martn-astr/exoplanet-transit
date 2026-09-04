@@ -15,6 +15,7 @@ from pht_app.data.fp_diagnostics import (
     run_all_diagnostics,
     odd_even_folded_curves,
     secondary_zoom_curves,
+    suggest_corrected_period,
 )
 from pht_app.data.tpf_centroid import (
     download_tpf,
@@ -31,7 +32,7 @@ __all__ = [
     "estimate_max_period", "period_vs_impact_parameter", "estimate_transit_duration_hours", "FORMULA_LATEX",
     "apply_masks", "masked_lightcurve",
     "odd_even_test", "transit_shape_test", "secondary_eclipse_test", "run_all_diagnostics",
-    "odd_even_folded_curves", "secondary_zoom_curves",
+    "odd_even_folded_curves", "secondary_zoom_curves", "suggest_corrected_period",
     "download_tpf", "build_difference_image", "query_gaia_sources", "centroid_shift_estimate",
     "centroid_offset_arcsec",
 ]
