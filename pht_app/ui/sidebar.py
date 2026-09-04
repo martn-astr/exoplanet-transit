@@ -131,6 +131,19 @@ def render_sidebar():
                 )
             with col_b:
                 if st.button("⬇ PDF", use_container_width=True):
+                    from pht_app.data.tpf_centroid import centroid_offset_arcsec
+
+                    duration_days = (
+                        st.session_state.bls_result["best_duration"]
+                        if st.session_state.bls_result else 3.0 / 24.0
+                    )
+                    centroid_offset = None
+                    sp = st.session_state.stellar_params
+                    if st.session_state.centroid_result and sp:
+                        centroid_offset = centroid_offset_arcsec(
+                            st.session_state.centroid_result, sp.get("ra"), sp.get("dec")
+                        )
+
                     with st.spinner("Building PDF report..."):
                         st.session_state.pdf_export_bytes = build_pdf_report_bytes(
                             tic_id=tic_id,
@@ -142,6 +155,8 @@ def render_sidebar():
                             fold_epoch=st.session_state.fold_epoch,
                             bls_result=st.session_state.bls_result,
                             fp_result=st.session_state.fp_diagnostics_result,
+                            duration_days=duration_days,
+                            centroid_offset=centroid_offset,
                         )
 
             if st.session_state.get("pdf_export_bytes"):
