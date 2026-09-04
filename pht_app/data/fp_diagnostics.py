@@ -95,19 +95,27 @@ def secondary_zoom_curves(lc, period, epoch, duration_days, window_factor=3.0, n
 
 
 def odd_even_test(lc, period, epoch, duration_days, n_bins=20,
-                   sigma_threshold=5.0, min_relative_mismatch=0.20):
+                   sigma_threshold=5.0, min_relative_mismatch=0.20,
+                   local_baseline_factor=3.0):
     """
-    Compare the mean in-transit depth of odd-numbered vs even-numbered transits.
+    Compare the in-transit depth of odd-numbered vs even-numbered transits.
     Returns dict with depths, their difference in sigma, and a flag.
 
-    Flags only require BOTH statistical significance (sigma_threshold) AND a
-    practically meaningful relative depth mismatch (min_relative_mismatch).
-    With the thousands of cadences in a stitched multi-sector light curve,
-    the standard error on depth shrinks so small that even a trivial,
-    noise-level asymmetry becomes ">3 sigma" purely because of the large
-    sample size — that was flagging genuinely clean planet transits as
-    false positives. Requiring the mismatch to also be a meaningful fraction
-    of the transit depth itself (not just non-zero) fixes that.
+    Depth is measured against each group's OWN local out-of-transit baseline
+    (points within local_baseline_factor x duration of each transit, minus
+    the in-transit window itself) rather than an assumed global baseline of
+    exactly 1.0. This matters a lot in practice: each sector is normalized
+    independently during stitching, so tiny per-sector calibration offsets
+    (routinely 0.1-0.5%, and totally normal) get misread as a real depth
+    difference whenever odd- and even-numbered transits happen to fall in
+    different sectors — which is common. Using a local baseline per group
+    cancels that out, since both the in-transit and baseline points for a
+    given group come from the same nearby (same-sector) data.
+
+    Flags also require BOTH statistical significance (sigma_threshold) AND a
+    practically meaningful relative depth mismatch (min_relative_mismatch) —
+    with the tens of thousands of cadences in a stitched multi-sector light
+    curve, even a trivial asymmetry becomes ">3 sigma" from sample size alone.
     """
     time_vals = lc.time.value
     flux_vals = lc.flux.value
@@ -115,17 +123,32 @@ def odd_even_test(lc, period, epoch, duration_days, n_bins=20,
     transit_number = np.round((time_vals - epoch) / period)
     phase = ((time_vals - epoch + 0.5 * period) % period) - 0.5 * period
     in_transit = np.abs(phase) <= duration_days / 2.0
+    near_transit = np.abs(phase) <= duration_days * local_baseline_factor / 2.0
+    local_baseline = near_transit & ~in_transit
 
-    odd_mask = in_transit & (transit_number % 2 != 0)
-    even_mask = in_transit & (transit_number % 2 == 0)
+    def _group_depth(parity_mask):
+        in_grp = in_transit & parity_mask
+        base_grp = local_baseline & parity_mask
+        if in_grp.sum() < 10 or base_grp.sum() < 10:
+            return None
+        baseline_flux = np.nanmedian(flux_vals[base_grp])
+        transit_flux = np.nanmedian(flux_vals[in_grp])
+        depth = baseline_flux - transit_flux
+        # Combine in-transit and local-baseline scatter for the error estimate.
+        err = np.sqrt(
+            (np.nanstd(flux_vals[in_grp]) / np.sqrt(in_grp.sum())) ** 2
+            + (np.nanstd(flux_vals[base_grp]) / np.sqrt(base_grp.sum())) ** 2
+        )
+        return depth, err, int(in_grp.sum())
 
-    if odd_mask.sum() < 10 or even_mask.sum() < 10:
-        return {"status": "insufficient_data", "message": "Not enough odd/even transits in this baseline."}
+    odd_result = _group_depth(transit_number % 2 != 0)
+    even_result = _group_depth(transit_number % 2 == 0)
 
-    odd_depth = 1.0 - np.nanmedian(flux_vals[odd_mask])
-    even_depth = 1.0 - np.nanmedian(flux_vals[even_mask])
-    odd_err = np.nanstd(flux_vals[odd_mask]) / np.sqrt(odd_mask.sum())
-    even_err = np.nanstd(flux_vals[even_mask]) / np.sqrt(even_mask.sum())
+    if odd_result is None or even_result is None:
+        return {"status": "insufficient_data", "message": "Not enough odd/even transits (with local baseline coverage) in this baseline."}
+
+    odd_depth, odd_err, n_odd = odd_result
+    even_depth, even_err, n_even = even_result
 
     combined_err = np.sqrt(odd_err ** 2 + even_err ** 2)
     sigma_diff = abs(odd_depth - even_depth) / combined_err if combined_err > 0 else 0.0

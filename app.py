@@ -19,7 +19,7 @@ Structure:
 import streamlit as st
 
 from pht_app.config import init_session_state
-from pht_app.data import resolve_tic, query_exofop, search_available_sectors, download_and_stitch
+from pht_app.data import resolve_tic, query_exofop, search_available_sectors, download_and_stitch, run_bls
 from pht_app.ui.sidebar import render_sidebar
 from pht_app.ui.header import render_header
 from pht_app.panels.timeline import render_timeline_panel
@@ -100,6 +100,17 @@ if actions["load_clicked"]:
         for msg in logs:
             st.toast(msg)
 
+        # Automatically find the period right away (BLS over a broad default
+        # range) so a period is available immediately — no need to open the
+        # Periodogram panel and click "Recompute" just to see it.
+        if stitched is not None:
+            with st.spinner("Automatically searching for the period (BLS)..."):
+                auto_bls = run_bls(stitched, min_period=0.5, max_period=20.0)
+            if auto_bls is not None:
+                st.session_state.bls_result = auto_bls
+                st.session_state.fold_period = auto_bls["best_period"]
+                st.session_state.fold_epoch = auto_bls["best_t0"]
+
 if actions["add_mask"]:
     st.session_state.signal_masks.append({
         "period": actions["mask_period"],
@@ -114,6 +125,24 @@ if actions["add_mask"]:
 # Header
 # --------------------------------------------------------------------------
 render_header()
+
+# Prominent, always-visible detected-period readout — computed automatically
+# as soon as sectors are loaded (see the auto-BLS call above), so the period
+# is immediately visible here without needing to open the Periodogram panel.
+if st.session_state.bls_result is not None:
+    bls = st.session_state.bls_result
+    pc1, pc2, pc3, pc4 = st.columns(4)
+    pc1.metric("🔎 Detected Period", f"{bls['best_period']:.4f} d")
+    pc2.metric("Epoch T0", f"{bls['best_t0']:.4f} BTJD")
+    pc3.metric("Duration", f"{bls['best_duration']*24:.2f} h")
+    pc4.metric("Depth", f"{bls['best_depth']*100:.3f} %")
+    st.caption(
+        "Automatically detected via BLS as soon as sectors were loaded. "
+        "Fine-tune it (or search a different range) in the Periodogram panel below."
+    )
+elif st.session_state.stitched_lc is not None:
+    st.caption("Automatic period search did not converge on this baseline — try adjusting the range in the Periodogram panel below.")
+
 st.divider()
 
 # --------------------------------------------------------------------------

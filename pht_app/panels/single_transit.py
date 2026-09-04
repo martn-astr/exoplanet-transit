@@ -35,21 +35,45 @@ def render_single_transit_panel():
 
     st.latex(FORMULA_LATEX)
 
+    # Default T0/T14 from the auto-detected BLS fit when available, rather
+    # than an arbitrary fixed guess (this field used to always show 3.0h
+    # regardless of the actual data) — falls back to a manually clicked
+    # value, then finally a bare guess only if nothing else is available.
+    bls = st.session_state.bls_result
+    if st.session_state.click_t0:
+        default_t0 = float(st.session_state.click_t0)
+    elif bls:
+        default_t0 = float(bls["best_t0"])
+    else:
+        default_t0 = float(lc.time.value[0])
+
+    if st.session_state.click_t14_hours:
+        default_t14 = float(st.session_state.click_t14_hours)
+    elif bls:
+        default_t14 = float(bls["best_duration"] * 24.0)
+    else:
+        default_t14 = 3.0
+
     c1, c2, c3 = st.columns(3)
     t0 = c1.number_input(
         "Transit epoch T0 (BTJD)",
-        value=float(st.session_state.click_t0) if st.session_state.click_t0 else float(lc.time.value[0]),
+        value=default_t0,
         step=0.001, format="%.4f",
-        help="Time of the single observed transit's minimum. Read this off Panel 1.",
+        help="Time of the single observed transit's minimum. Defaults to the BLS-detected epoch "
+             "if available, or read it off Panel 1.",
     )
     t14 = c2.number_input(
         "Transit duration T14 (hours)",
         min_value=0.01,
-        value=float(st.session_state.click_t14_hours) if st.session_state.click_t14_hours else 3.0,
+        value=default_t14,
         step=0.1,
-        help="Full transit duration, ingress to egress, in hours. Read this off Panel 1.",
+        help="Full transit duration, ingress to egress, in hours. Defaults to the BLS-fitted "
+             "duration if available, or read it off Panel 1.",
     )
     c3.metric("M★ (M☉)", f"{sp['M_star']:.3f}")
+
+    if bls and not st.session_state.click_t14_hours:
+        st.caption("ℹ T0/T14 pre-filled from the auto-detected BLS period. Adjust them if you're marking a different, single visible dip.")
 
     compute = st.button("Compute Maximum Period", type="primary")
 
