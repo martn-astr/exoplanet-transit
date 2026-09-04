@@ -96,9 +96,18 @@ def render_fp_diagnostics_panel():
         st.caption("Set a period/epoch in Panel 2 (or via the single-transit estimator) before running diagnostics.")
         return
 
+    # Default to the BLS-fitted transit duration when available, rather than
+    # an arbitrary fixed guess — using the wrong window width is the main
+    # reason these tests can silently miss a real eclipsing binary signal
+    # (too narrow a window catches only baseline, not the actual eclipse).
+    bls = st.session_state.bls_result
+    default_duration_hours = bls["best_duration"] * 24.0 if bls else 3.0
+
     duration_days = st.number_input(
         "Assumed transit duration for diagnostics (hours)",
-        min_value=0.1, value=3.0, step=0.1,
+        min_value=0.1, value=float(default_duration_hours), step=0.1,
+        help="Defaults to the BLS-fitted duration when a periodogram has been run. "
+             "If this doesn't match the actual eclipse width, the tests below can miss a real signal.",
     ) / 24.0
 
     if st.button("Run False Positive Diagnostics", type="primary"):
@@ -109,7 +118,34 @@ def render_fp_diagnostics_panel():
     if result is None:
         return
 
+    n_inconclusive = sum(
+        1 for d in (result["odd_even"], result["shape"], result["secondary_eclipse"])
+        if d.get("status") != "ok"
+    )
+    if n_inconclusive:
+        st.warning(
+            f"⚠ {n_inconclusive} of 3 diagnostic(s) could not run (insufficient data in the assumed "
+            f"transit window) and are **not** reflected in the verdict below — a clean verdict does not "
+            f"mean those specific checks passed. Try adjusting the assumed transit duration above, "
+            f"or confirm the period/epoch are accurate."
+        )
+
     st.markdown(f"**Verdict:** {result['verdict']}")
+
+    suggestion = result.get("period_suggestion")
+    if suggestion:
+        sc1, sc2 = st.columns([3, 1])
+        with sc1:
+            st.error(
+                f"⚠ Incorrect period suspected — {suggestion['reason']}.\n\n"
+                f"**Period: {suggestion['label']}**"
+            )
+        with sc2:
+            st.write("")  # vertical spacer to align button with the message box
+            if st.button("Use corrected period", use_container_width=True):
+                st.session_state.fold_period = suggestion["corrected_period"]
+                st.session_state.fp_diagnostics_result = None
+                st.rerun()
 
     c1, c2, c3 = st.columns(3)
 
@@ -121,7 +157,7 @@ def render_fp_diagnostics_panel():
             st.caption(oe["message"])
             st.write(f"Odd depth: {oe['odd_depth']:.5f}")
             st.write(f"Even depth: {oe['even_depth']:.5f}")
-            st.write(f"Mismatch: {oe['sigma_diff']:.1f}σ")
+            st.write(f"Mismatch: {oe['sigma_diff']:.1f}σ ({oe['relative_mismatch']*100:.0f}% relative)")
         else:
             st.caption(oe["message"])
 
@@ -142,7 +178,7 @@ def render_fp_diagnostics_panel():
         if se["status"] == "ok":
             st.write(_verdict_badge(se["likely_eb"]))
             st.caption(se["message"])
-            st.write(f"Depth: {se['secondary_depth']:.5f}")
+            st.write(f"Depth: {se['secondary_depth']:.5f} ({se['relative_depth']*100:.0f}% of primary)")
             st.write(f"Significance: {se['significance_sigma']:.1f}σ")
         else:
             st.caption(se["message"])
@@ -174,8 +210,25 @@ def render_tpf_centroid_panel():
     with c2:
         launch = st.button("Load TPF & Compute Difference Image", type="primary")
 
-    t0 = st.session_state.fold_epoch or st.session_state.click_t0
-    duration_days = (st.session_state.click_t14_hours or 3.0) / 24.0
+    t0 = st.session_state.fold_epoch or st.session_state.click_t0 or (
+        st.session_state.bls_result["best_t0"] if st.session_state.bls_result else None
+    )
+    # Prefer the BLS-fitted duration (from the graph/periodogram) over a
+    # manually clicked or guessed value, so this stays in sync with whatever
+    # signal the periodogram actually found.
+    if st.session_state.bls_result:
+        duration_hours = st.session_state.bls_result["best_duration"] * 24.0
+    elif st.session_state.click_t14_hours:
+        duration_hours = st.session_state.click_t14_hours
+    else:
+        duration_hours = 3.0
+    duration_days = duration_hours / 24.0
+
+    st.caption(
+        f"Using T0 = {t0:.4f} BTJD, duration = {duration_hours:.2f} h "
+        f"({'from BLS fit' if st.session_state.bls_result else 'from manual entry'})."
+        if t0 is not None else ""
+    )
 
     if t0 is None:
         st.caption("Set a transit epoch (Panel 2 fold or single-transit estimator) first.")

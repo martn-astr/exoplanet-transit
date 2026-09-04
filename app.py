@@ -11,6 +11,7 @@ Structure:
     pht_app/ui/sidebar.py       sidebar controls
     pht_app/ui/header.py        stellar-params + ExoFOP header card
     pht_app/panels/timeline.py    Panel 1 — stitched timeline
+    pht_app/panels/per_sector.py  per-sector breakdown (each sector, own subplot)
     pht_app/panels/phasefold.py   Panel 2 — phase-folded view
     pht_app/panels/periodogram.py Panel 3 — BLS / Lomb-Scargle
 """
@@ -22,13 +23,41 @@ from pht_app.data import resolve_tic, query_exofop, search_available_sectors, do
 from pht_app.ui.sidebar import render_sidebar
 from pht_app.ui.header import render_header
 from pht_app.panels.timeline import render_timeline_panel
+from pht_app.panels.per_sector import render_per_sector_panel
 from pht_app.panels.phasefold import render_phasefold_panel
 from pht_app.panels.periodogram import render_periodogram_panel
 from pht_app.panels.single_transit import render_single_transit_panel
 from pht_app.panels.fp_and_tpf import render_fp_diagnostics_panel, render_tpf_centroid_panel
+from pht_app.panels.eb_style_view import render_eb_style_panel
 
 st.set_page_config(page_title="PHT Candidate Validator", page_icon="🪐", layout="wide",
                     initial_sidebar_state="expanded")
+
+# Extra breathing room between panel sections — Streamlit's default spacing
+# packs consecutive elements (subheaders, charts, dividers) tightly together.
+st.markdown("""
+<style>
+div[data-testid="stVerticalBlock"] > div:has(> div.pht-section-gap) {
+    margin-top: 2.5rem;
+}
+div[data-testid="stPlotlyChart"] {
+    margin-bottom: 1.25rem;
+}
+h3 {
+    margin-top: 1rem !important;
+    padding-top: 0.5rem;
+}
+hr {
+    margin: 2rem 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def _section_gap():
+    """Visible vertical gap between major panel sections (beyond a plain divider)."""
+    st.markdown('<div class="pht-section-gap" style="height:1.5rem;"></div>', unsafe_allow_html=True)
+
 
 init_session_state(st)
 
@@ -94,6 +123,7 @@ st.divider()
 #   Row 2: Phase-fold | Periodogram, side by side
 # --------------------------------------------------------------------------
 render_timeline_panel()
+_section_gap()
 
 fold_col, periodogram_col = st.columns(2)
 with fold_col:
@@ -102,15 +132,27 @@ with periodogram_col:
     render_periodogram_panel()
 
 st.divider()
+_section_gap()
+
+# --------------------------------------------------------------------------
+# Per-sector breakdown — each sector plotted separately, stacked vertically,
+# so individual sectors can be compared without zooming into the merged
+# stitched timeline above.
+# --------------------------------------------------------------------------
+render_per_sector_panel()
+
+st.divider()
+_section_gap()
 
 # --------------------------------------------------------------------------
 # Analysis tools — separated into their own tabs so each is a clean, fully
 # visible panel rather than everything stacked one below the other.
 # --------------------------------------------------------------------------
-tab_single_transit, tab_fp, tab_tpf = st.tabs([
+tab_single_transit, tab_fp, tab_tpf, tab_eb_style = st.tabs([
     "🎯 Single-Transit Estimator",
     "🕵️ False Positive Diagnostics",
     "📍 TPF Centroid Check",
+    "🌑 EB Signal View",
 ])
 
 with tab_single_transit:
@@ -121,6 +163,9 @@ with tab_fp:
 
 with tab_tpf:
     render_tpf_centroid_panel()
+
+with tab_eb_style:
+    render_eb_style_panel()
 
 st.divider()
 st.caption(

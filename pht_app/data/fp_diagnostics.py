@@ -94,10 +94,20 @@ def secondary_zoom_curves(lc, period, epoch, duration_days, window_factor=3.0, n
     return {"status": "ok", "primary": primary, "secondary": secondary}
 
 
-def odd_even_test(lc, period, epoch, duration_days, n_bins=20):
+def odd_even_test(lc, period, epoch, duration_days, n_bins=20,
+                   sigma_threshold=5.0, min_relative_mismatch=0.20):
     """
     Compare the mean in-transit depth of odd-numbered vs even-numbered transits.
     Returns dict with depths, their difference in sigma, and a flag.
+
+    Flags only require BOTH statistical significance (sigma_threshold) AND a
+    practically meaningful relative depth mismatch (min_relative_mismatch).
+    With the thousands of cadences in a stitched multi-sector light curve,
+    the standard error on depth shrinks so small that even a trivial,
+    noise-level asymmetry becomes ">3 sigma" purely because of the large
+    sample size — that was flagging genuinely clean planet transits as
+    false positives. Requiring the mismatch to also be a meaningful fraction
+    of the transit depth itself (not just non-zero) fixes that.
     """
     time_vals = lc.time.value
     flux_vals = lc.flux.value
@@ -109,7 +119,7 @@ def odd_even_test(lc, period, epoch, duration_days, n_bins=20):
     odd_mask = in_transit & (transit_number % 2 != 0)
     even_mask = in_transit & (transit_number % 2 == 0)
 
-    if odd_mask.sum() < 3 or even_mask.sum() < 3:
+    if odd_mask.sum() < 10 or even_mask.sum() < 10:
         return {"status": "insufficient_data", "message": "Not enough odd/even transits in this baseline."}
 
     odd_depth = 1.0 - np.nanmedian(flux_vals[odd_mask])
@@ -120,55 +130,67 @@ def odd_even_test(lc, period, epoch, duration_days, n_bins=20):
     combined_err = np.sqrt(odd_err ** 2 + even_err ** 2)
     sigma_diff = abs(odd_depth - even_depth) / combined_err if combined_err > 0 else 0.0
 
-    flag = sigma_diff > 3.0  # >3-sigma mismatch flags likely EB
+    mean_depth = 0.5 * (abs(odd_depth) + abs(even_depth))
+    relative_mismatch = abs(odd_depth - even_depth) / mean_depth if mean_depth > 0 else 0.0
+
+    flag = (sigma_diff > sigma_threshold) and (relative_mismatch > min_relative_mismatch)
 
     return {
         "status": "ok",
         "odd_depth": float(odd_depth),
         "even_depth": float(even_depth),
         "sigma_diff": float(sigma_diff),
+        "relative_mismatch": float(relative_mismatch),
         "likely_eb": bool(flag),
         "message": (
-            f"Odd/even depth mismatch of {sigma_diff:.1f}σ — "
+            f"Odd/even depth mismatch of {sigma_diff:.1f}σ ({relative_mismatch*100:.0f}% relative) — "
             + ("consistent with an eclipsing binary at half the true period."
                if flag else "consistent with a genuine planetary transit.")
         ),
     }
 
 
-def transit_shape_test(lc, period, epoch, duration_days):
+def transit_shape_test(lc, period, epoch, duration_days, flatness_threshold=0.65):
     """
     Classify transit shape as V-shaped (grazing EB) or U-shaped (planet) using
     a normalized "flatness" statistic: the ratio of the flux variance near the
     bottom quartile of the transit vs. near its edges. A flat bottom (U-shape,
     low variance ratio) suggests a planet; a sharply peaked bottom (V-shape,
     high ratio, no flat minimum) suggests a grazing eclipsing binary.
+
+    Uses percentile-based depth (5th percentile, not the raw minimum) so a
+    single noisy outlier point can't dominate the full-depth estimate and
+    artificially inflate the flatness ratio — the raw-minimum version was
+    prone to misclassifying clean, genuinely flat-bottomed transits as
+    V-shaped whenever one low-noise point dipped a bit further than the rest.
     """
     phase, flux, _ = phase_fold(lc, period, epoch)
     half_dur_phase = (duration_days / 2.0) / period
 
     in_transit = np.abs(phase) <= half_dur_phase
-    if in_transit.sum() < 10:
+    if in_transit.sum() < 20:
         return {"status": "insufficient_data", "message": "Not enough in-transit points to assess shape."}
 
     t_phase = phase[in_transit]
     t_flux = flux[in_transit]
 
-    # Split into "core" (middle third) vs "edges" (outer thirds) of the transit
-    core_mask = np.abs(t_phase) <= half_dur_phase / 3.0
+    # Core = central 50% of the transit width (by phase), edges = the rest.
+    core_mask = np.abs(t_phase) <= half_dur_phase * 0.5
     edge_mask = ~core_mask
 
-    if core_mask.sum() < 3 or edge_mask.sum() < 3:
+    if core_mask.sum() < 8 or edge_mask.sum() < 8:
         return {"status": "insufficient_data", "message": "Not enough resolution across the transit to assess shape."}
 
-    core_flux_std = np.nanstd(t_flux[core_mask])
-    core_depth_range = np.nanmax(t_flux[core_mask]) - np.nanmin(t_flux[core_mask])
-    full_depth = 1.0 - np.nanmin(t_flux)
+    # Robust (percentile-based) depth estimates instead of raw min/max, so a
+    # single noisy point can't dominate the statistic.
+    core_p10 = np.nanpercentile(t_flux[core_mask], 10)
+    core_p90 = np.nanpercentile(t_flux[core_mask], 90)
+    core_depth_range = core_p90 - core_p10
+    full_depth = 1.0 - np.nanpercentile(t_flux, 5)
 
-    # A flat-bottomed (U-shaped) transit has small core depth range relative to full depth.
     flatness_ratio = core_depth_range / full_depth if full_depth > 0 else np.nan
 
-    is_v_shaped = flatness_ratio > 0.5  # core still varies almost as much as full depth => no flat bottom
+    is_v_shaped = flatness_ratio is not None and not np.isnan(flatness_ratio) and flatness_ratio > flatness_threshold
 
     return {
         "status": "ok",
@@ -183,20 +205,29 @@ def transit_shape_test(lc, period, epoch, duration_days):
     }
 
 
-def secondary_eclipse_test(lc, period, epoch, duration_days, n_bins=50):
+def secondary_eclipse_test(lc, period, epoch, duration_days, n_bins=50,
+                            sigma_threshold=5.0, min_relative_depth=0.15):
     """
     Search for flux modulation at phase 0.5 (the classic secondary-eclipse
     location for a circular orbit). A significant dip there — beyond what's
     expected from noise — suggests an eclipsing binary rather than a planet
     (planets' secondary eclipses are typically far below TESS's noise floor).
+
+    Flags only require BOTH statistical significance (sigma_threshold) AND
+    the secondary depth being a meaningful fraction of the primary transit
+    depth (min_relative_depth) — otherwise, with a large enough sample, even
+    a real but astrophysically tiny bump (or correlated instrumental
+    systematics) reads as ">3 sigma" without being a genuine secondary
+    eclipse.
     """
     phase, flux, _ = phase_fold(lc, period, epoch)
     half_dur_phase = (duration_days / 2.0) / period
 
+    primary_mask = np.abs(phase) <= half_dur_phase
     secondary_mask = np.abs(np.abs(phase) - 0.5) <= half_dur_phase
     baseline_mask = (np.abs(phase) > 3 * half_dur_phase) & (np.abs(np.abs(phase) - 0.5) > 3 * half_dur_phase)
 
-    if secondary_mask.sum() < 3 or baseline_mask.sum() < 10:
+    if secondary_mask.sum() < 10 or baseline_mask.sum() < 20 or primary_mask.sum() < 10:
         return {"status": "insufficient_data", "message": "Not enough phase coverage near 0.5 to test for a secondary eclipse."}
 
     secondary_flux = np.nanmedian(flux[secondary_mask])
@@ -204,20 +235,54 @@ def secondary_eclipse_test(lc, period, epoch, duration_days, n_bins=50):
     baseline_std = np.nanstd(flux[baseline_mask])
     secondary_err = baseline_std / np.sqrt(secondary_mask.sum())
 
+    primary_depth = baseline_flux - np.nanmedian(flux[primary_mask])
     depth = baseline_flux - secondary_flux
     sigma = depth / secondary_err if secondary_err > 0 else 0.0
 
-    flag = sigma > 3.0
+    relative_depth = depth / primary_depth if primary_depth > 0 else 0.0
+
+    flag = (sigma > sigma_threshold) and (relative_depth > min_relative_depth)
 
     return {
         "status": "ok",
         "secondary_depth": float(depth),
+        "relative_depth": float(relative_depth),
         "significance_sigma": float(sigma),
         "likely_eb": bool(flag),
         "message": (
-            f"Secondary eclipse detected at {sigma:.1f}σ significance — "
+            f"Secondary eclipse detected at {sigma:.1f}σ significance ({relative_depth*100:.0f}% of primary depth) — "
             + ("likely an eclipsing binary." if flag else "consistent with a planet (no significant secondary).")
         ),
+    }
+
+
+def suggest_corrected_period(period, odd_even_result, secondary_result):
+    """
+    When odd/even depths mismatch and/or a significant secondary eclipse is
+    found, the classic explanation is that the search locked onto HALF the
+    true orbital period (alternating primary/secondary eclipses of an
+    eclipsing binary being mistaken for a regular sequence of transits).
+
+    Returns a suggestion dict if either indicator is flagged, else None.
+    """
+    odd_even_flag = odd_even_result.get("status") == "ok" and odd_even_result.get("likely_eb")
+    secondary_flag = secondary_result.get("status") == "ok" and secondary_result.get("likely_eb")
+
+    if not (odd_even_flag or secondary_flag):
+        return None
+
+    reasons = []
+    if odd_even_flag:
+        reasons.append("odd/even transit depths differ significantly")
+    if secondary_flag:
+        reasons.append("a significant secondary eclipse was detected at phase 0.5")
+
+    corrected_period = period * 2.0
+    return {
+        "original_period": float(period),
+        "corrected_period": float(corrected_period),
+        "reason": " and ".join(reasons),
+        "label": f"{period:.4g} x 2 = {corrected_period:.4g} days",
     }
 
 
@@ -227,20 +292,31 @@ def run_all_diagnostics(lc, period, epoch, duration_days):
     shape = transit_shape_test(lc, period, epoch, duration_days)
     secondary = secondary_eclipse_test(lc, period, epoch, duration_days)
 
-    flags = [d.get("likely_eb", False) for d in (odd_even, shape, secondary) if d.get("status") == "ok"]
+    checks = (odd_even, shape, secondary)
+    flags = [d.get("likely_eb", False) for d in checks if d.get("status") == "ok"]
     n_flagged = sum(flags)
+    n_inconclusive = sum(1 for d in checks if d.get("status") != "ok")
 
-    if n_flagged == 0:
+    if n_flagged == 0 and n_inconclusive == 0:
         verdict = "No false-positive indicators triggered — candidate remains viable."
+    elif n_flagged == 0 and n_inconclusive > 0:
+        verdict = (
+            f"No false-positive indicators triggered, but {n_inconclusive} of 3 diagnostic(s) could not "
+            f"run (insufficient data in the assumed transit window) — this is inconclusive, not a clean pass."
+        )
     elif n_flagged == 1:
         verdict = "One diagnostic flagged a possible false positive — worth closer inspection."
     else:
         verdict = f"{n_flagged} diagnostics flagged false-positive indicators — likely an eclipsing binary."
+
+    period_suggestion = suggest_corrected_period(period, odd_even, secondary)
 
     return {
         "odd_even": odd_even,
         "shape": shape,
         "secondary_eclipse": secondary,
         "n_flagged": n_flagged,
+        "n_inconclusive": n_inconclusive,
         "verdict": verdict,
+        "period_suggestion": period_suggestion,
     }

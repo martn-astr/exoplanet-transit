@@ -158,13 +158,23 @@ def build_pdf_report_bytes(
 
             lines = [f"False Positive Diagnostics", "", f"Verdict: {fp_result.get('verdict', 'N/A')}", ""]
 
+            suggestion = fp_result.get("period_suggestion")
+            if suggestion:
+                lines += [
+                    "*** INCORRECT PERIOD SUSPECTED ***",
+                    f"  Reason: {suggestion['reason']}",
+                    f"  Period: {suggestion['label']}",
+                    "",
+                ]
+
             oe = fp_result.get("odd_even", {})
             if oe.get("status") == "ok":
                 lines += [
                     "Odd vs Even Depth:",
                     f"  Odd depth:  {oe['odd_depth']:.5f}",
                     f"  Even depth: {oe['even_depth']:.5f}",
-                    f"  Mismatch:   {oe['sigma_diff']:.1f}σ  →  {'FLAGGED' if oe['likely_eb'] else 'OK'}",
+                    f"  Mismatch:   {oe['sigma_diff']:.1f}σ ({oe['relative_mismatch']*100:.0f}% relative)  →  "
+                    f"{'FLAGGED' if oe['likely_eb'] else 'OK'}",
                     "",
                 ]
 
@@ -182,7 +192,7 @@ def build_pdf_report_bytes(
             if se.get("status") == "ok":
                 lines += [
                     "Secondary Eclipse Search:",
-                    f"  Depth: {se['secondary_depth']:.5f}",
+                    f"  Depth: {se['secondary_depth']:.5f} ({se['relative_depth']*100:.0f}% of primary)",
                     f"  Significance: {se['significance_sigma']:.1f}σ  →  "
                     f"{'FLAGGED' if se['likely_eb'] else 'OK'}",
                 ]
