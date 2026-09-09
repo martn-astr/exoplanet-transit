@@ -50,20 +50,10 @@ def _search_lightcurve_with_ui_logs(target: str, logs: list[str] | None = None, 
 
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
-def search_available_sectors(tic_id: str):
-    """
-    Query MAST for every available light-curve product for this TIC across
-    SPOC 2-min and FFI-derived pipelines (TESS-SPOC, QLP), grouped by sector.
-    """
-    clean_id = clean_tic_id(tic_id)
-    target = f"TIC {clean_id}"
+def _parse_available_sectors(table_json: str) -> list[dict[str, object]]:
+    table = pd.read_json(table_json, orient="split")
+    sectors: dict[int, dict[str, object]] = {}
 
-    search_result = _search_lightcurve_with_ui_logs(target)
-    if search_result is None or len(search_result) == 0:
-        return []
-
-    table = search_result.table.to_pandas()
-    sectors = {}
     for _, row in table.iterrows():
         sector = _safe_int(row.get("sequence_number"), -1)
         if sector == -1:
@@ -86,7 +76,7 @@ def search_available_sectors(tic_id: str):
         if author in FFI_FALLBACK_AUTHORS:
             entry["has_ffi_fallback"] = True
 
-    out = []
+    out: list[dict[str, object]] = []
     for sector in sorted(sectors.keys()):
         e = sectors[sector]
         out.append({
@@ -96,6 +86,21 @@ def search_available_sectors(tic_id: str):
             "has_ffi_fallback": e["has_ffi_fallback"],
         })
     return out
+
+
+def search_available_sectors(tic_id: str):
+    """
+    Query MAST for every available light-curve product for this TIC across
+    SPOC 2-min and FFI-derived pipelines (TESS-SPOC, QLP), grouped by sector.
+    """
+    clean_id = clean_tic_id(tic_id)
+    target = f"TIC {clean_id}"
+
+    search_result = _search_lightcurve_with_ui_logs(target)
+    if search_result is None or len(search_result) == 0:
+        return []
+
+    return _parse_available_sectors(search_result.table.to_pandas().to_json(orient="split"))
 
 
 def _download_one_sector(target: str, sector: int, prefer_source: str, logs: list):

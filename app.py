@@ -78,10 +78,10 @@ if actions["search_clicked"] and actions["tic_input"].strip():
     with st.spinner("Querying MAST for available sectors..."):
         st.session_state.sector_list = search_available_sectors(st.session_state.tic_id)
 if actions["load_clicked"]:
-    reset_for_sector_reload(st)
     if not actions["selected_sectors"]:
         st.warning("Select at least one sector.")
     else:
+        reset_for_sector_reload(st)
         with st.spinner(f"Downloading and stitching {len(actions['selected_sectors'])} sector(s)..."):
             stitched, per_sector, logs = download_and_stitch(
                 st.session_state.tic_id,
