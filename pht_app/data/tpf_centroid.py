@@ -61,6 +61,12 @@ def build_difference_image(tpf, t0: float, duration_days: float, oot_buffer_days
 
 
 @st.cache_data(show_spinner=False)
+def _query_gaia_sources_cached(query: str) -> "pd.DataFrame":
+    job = Gaia.launch_job(query)
+    result = job.get_results()
+    return result.to_pandas()
+
+
 def query_gaia_sources(
     ra: float,
     dec: float,
@@ -84,9 +90,7 @@ def query_gaia_sources(
     ORDER BY phot_g_mean_mag ASC
     """
     try:
-        job = Gaia.launch_job(query)
-        result = job.get_results()
-        return result.to_pandas(), None
+        return _query_gaia_sources_cached(query), None
     except Exception as e:
         return None, str(e)
 
