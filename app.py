@@ -16,9 +16,11 @@ Structure:
     pht_app/panels/periodogram.py Panel 3 — BLS / Lomb-Scargle
 """
 
+from __future__ import annotations
+
 import streamlit as st
 
-from pht_app.config import init_session_state
+from pht_app.config import init_session_state, reset_for_new_target, reset_for_sector_reload
 from pht_app.data import resolve_tic, query_exofop, search_available_sectors, download_and_stitch, run_bls
 from pht_app.ui.sidebar import render_sidebar
 from pht_app.ui.header import render_header
@@ -67,6 +69,7 @@ init_session_state(st)
 actions = render_sidebar()
 
 if actions["search_clicked"] and actions["tic_input"].strip():
+    reset_for_new_target(st)
     st.session_state.tic_id = actions["tic_input"].strip()
     with st.spinner("Resolving TIC catalog parameters..."):
         st.session_state.stellar_params = resolve_tic(st.session_state.tic_id)
@@ -74,22 +77,16 @@ if actions["search_clicked"] and actions["tic_input"].strip():
         st.session_state.exofop_flags = query_exofop(st.session_state.tic_id)
     with st.spinner("Querying MAST for available sectors..."):
         st.session_state.sector_list = search_available_sectors(st.session_state.tic_id)
-    # Reset anything tied to the previous target
-    st.session_state.lc_collection = None
-    st.session_state.stitched_lc = None
-    st.session_state.timeline_xrange = None
-    st.session_state.bls_result = None
-    st.session_state.ls_result = None
-    st.session_state.fold_period = None
-    st.session_state.fold_epoch = None
-
 if actions["load_clicked"]:
+    reset_for_sector_reload(st)
     if not actions["selected_sectors"]:
         st.warning("Select at least one sector.")
     else:
         with st.spinner(f"Downloading and stitching {len(actions['selected_sectors'])} sector(s)..."):
             stitched, per_sector, logs = download_and_stitch(
-                st.session_state.tic_id, actions["selected_sectors"], st.session_state.data_source
+                st.session_state.tic_id,
+                tuple(actions["selected_sectors"]),
+                st.session_state.data_source,
             )
         st.session_state.stitched_lc = stitched
         st.session_state.lc_collection = per_sector

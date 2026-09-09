@@ -1,5 +1,10 @@
 """App-wide constants and session-state defaults."""
 
+from __future__ import annotations
+
+from collections.abc import MutableMapping
+from typing import Any
+
 APP_TITLE = "🪐 PHT Candidate Validator"
 APP_CAPTION = "Deterministic-physics exoplanet & variable-star vetting for Planet Hunters TESS"
 
@@ -12,7 +17,7 @@ FLUX_COLUMNS = ["PDCSAP_FLUX", "SAP_FLUX"]
 CACHE_TTL_SECONDS = 3600
 
 # Every key the app relies on in st.session_state, with its default value.
-SESSION_DEFAULTS = {
+SESSION_DEFAULTS: dict[str, object] = {
     # Target identity
     "tic_id": None,
     "stellar_params": None,
@@ -53,6 +58,7 @@ SESSION_DEFAULTS = {
     "tpf_data": None,             # downloaded TPF object for the flagged sector
     "tpf_diff_image": None,
     "gaia_sources": None,
+    "gaia_query_error": None,
     "centroid_result": None,
 
     # Export (Step: CSV/PDF)
@@ -65,3 +71,51 @@ def init_session_state(st):
     for key, val in SESSION_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = val
+
+
+_TARGET_SCOPED_KEYS: tuple[str, ...] = (
+    "tic_id",
+    "stellar_params",
+    "exofop_flags",
+    "sector_list",
+    "selected_sectors",
+)
+
+_ANALYSIS_SCOPED_KEYS: tuple[str, ...] = (
+    "lc_collection",
+    "stitched_lc",
+    "flux_column",
+    "timeline_xrange",
+    "fold_period",
+    "fold_epoch",
+    "periodogram_method",
+    "bls_result",
+    "ls_result",
+    "click_t0",
+    "click_t14_hours",
+    "single_transit_estimate",
+    "signal_masks",
+    "fp_diagnostics_result",
+    "tpf_data",
+    "tpf_diff_image",
+    "gaia_sources",
+    "gaia_query_error",
+    "centroid_result",
+    "pdf_export_bytes",
+)
+
+
+def _reset_scoped_keys(state: MutableMapping[str, Any], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        state[key] = SESSION_DEFAULTS[key]
+
+
+def reset_for_new_target(st) -> None:
+    """Clear target identity and all derived analysis for a brand-new TIC search."""
+    _reset_scoped_keys(st.session_state, _TARGET_SCOPED_KEYS)
+    _reset_scoped_keys(st.session_state, _ANALYSIS_SCOPED_KEYS)
+
+
+def reset_for_sector_reload(st) -> None:
+    """Clear cached load/analysis results while keeping the current target context."""
+    _reset_scoped_keys(st.session_state, _ANALYSIS_SCOPED_KEYS)

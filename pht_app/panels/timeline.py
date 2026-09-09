@@ -1,5 +1,7 @@
 """Panel 1 (top): full stitched multi-sector light curve, SAP/PDCSAP toggle."""
 
+from __future__ import annotations
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -50,6 +52,13 @@ def _available_flux_columns(lc, candidates):
     return present if present else ["flux"]
 
 
+def _decimate_for_display(x_vals, y_vals, max_points: int = 60_000):
+    if len(x_vals) <= max_points:
+        return x_vals, y_vals
+    stride = int(np.ceil(len(x_vals) / max_points))
+    return x_vals[::stride], y_vals[::stride]
+
+
 def render_timeline_panel():
     st.subheader("📈 Panel 1 — Stitched Timeline")
 
@@ -76,6 +85,7 @@ def render_timeline_panel():
 
     time_vals = lc.time.value
     flux_vals, n_backfilled = _flux_series(lc, flux_col)
+    plot_time_vals, plot_flux_vals = _decimate_for_display(time_vals, flux_vals)
     if n_backfilled:
         pct = 100.0 * n_backfilled / len(flux_vals)
         st.caption(
@@ -85,7 +95,7 @@ def render_timeline_panel():
 
     fig = go.Figure()
     fig.add_trace(go.Scattergl(
-        x=time_vals, y=flux_vals,
+        x=plot_time_vals, y=plot_flux_vals,
         mode="markers", marker=dict(size=3, opacity=0.6),
         name=flux_col,
     ))

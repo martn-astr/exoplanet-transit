@@ -1,11 +1,25 @@
 """Sidebar: TIC search bar, sector selector, data-source toggle, export buttons."""
 
+from __future__ import annotations
+
+from typing import TypedDict
+
 import streamlit as st
 
 from pht_app.config import SPOC_2MIN_LABEL, FFI_QLP_LABEL
 
 
-def render_sidebar():
+class SidebarActions(TypedDict):
+    search_clicked: bool
+    tic_input: str
+    load_clicked: bool
+    selected_sectors: list[int]
+    add_mask: bool
+    mask_period: float
+    mask_epoch: float
+
+
+def render_sidebar() -> SidebarActions:
     """
     Render the sidebar and return a dict of user actions taken this run:
         {
@@ -95,6 +109,8 @@ def render_sidebar():
         if st.session_state.sector_list:
             load_clicked = st.button("Download & Stitch Selected Sectors", use_container_width=True)
 
+        selected_sectors = [s for s, checked in sector_checkboxes.items() if checked]
+
         st.divider()
         st.subheader("Signal Masking")
         mask_period = st.number_input("Mask known period (days)", min_value=0.0, value=0.0, step=0.1,
@@ -120,10 +136,11 @@ def render_sidebar():
             from pht_app.export import build_csv_bytes, build_pdf_report_bytes
 
             tic_id = st.session_state.tic_id or "unknown"
+            cache_key = (tic_id, tuple(sorted(selected_sectors)))
 
             col_a, col_b = st.columns(2)
             with col_a:
-                csv_bytes = build_csv_bytes(lc)
+                csv_bytes = build_csv_bytes(lc, cache_key=cache_key)
                 st.download_button(
                     "⬇ CSV", data=csv_bytes,
                     file_name=f"TIC_{tic_id}_lightcurve.csv", mime="text/csv",
@@ -170,7 +187,7 @@ def render_sidebar():
         "search_clicked": search_clicked,
         "tic_input": tic_input,
         "load_clicked": load_clicked,
-        "selected_sectors": [s for s, checked in sector_checkboxes.items() if checked],
+        "selected_sectors": selected_sectors,
         "add_mask": add_mask,
         "mask_period": mask_period,
         "mask_epoch": mask_epoch,
