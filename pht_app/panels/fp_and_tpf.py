@@ -1,5 +1,7 @@
 """False Positive diagnostics + TPF spatial centroid checker (Step 4)."""
 
+from __future__ import annotations
+
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -250,8 +252,9 @@ def render_tpf_centroid_panel():
         st.session_state.tpf_diff_image = diff
 
         with st.spinner("Querying Gaia DR3 for nearby sources..."):
-            gaia = query_gaia_sources(diff["ra"], diff["dec"])
+            gaia, gaia_error = query_gaia_sources(diff["ra"], diff["dec"])
         st.session_state.gaia_sources = gaia
+        st.session_state.gaia_query_error = gaia_error
 
         st.session_state.centroid_result = centroid_shift_estimate(diff["diff_image"], diff["wcs"])
 
@@ -273,6 +276,9 @@ def render_tpf_centroid_panel():
             ))
 
         gaia = st.session_state.gaia_sources
+        gaia_error = st.session_state.gaia_query_error
+        if gaia_error:
+            st.warning(f"Gaia DR3 query error: {gaia_error}")
         if gaia is not None and len(gaia) > 0 and diff["wcs"] is not None:
             try:
                 px, py = diff["wcs"].world_to_pixel_values(gaia["ra"].values, gaia["dec"].values)

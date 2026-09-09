@@ -1,11 +1,8 @@
-"""
-Export helpers: CSV of the stitched light curve, and a PDF summary report
-(light curve, phase-fold, periodogram, stellar params, FP diagnostics
-verdict) in the spirit of a TESS SPOC Data Validation report page.
+"""Export helpers for stitched-light-curve CSV and PDF summary reports."""
 
-Kept dependency-light (matplotlib only) and free of Streamlit imports so it
-can be unit tested without a running app.
-"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import io
 import textwrap
@@ -14,15 +11,23 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import matplotlib
+import streamlit as st
 matplotlib.use("Agg")  # headless backend — required outside a GUI session
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
+if TYPE_CHECKING:
+    from lightkurve.lightcurve import LightCurve
 
-def build_csv_bytes(lc) -> bytes:
+
+@st.cache_data(show_spinner=False, hash_funcs={"lightkurve.lightcurve.LightCurve": id})
+def build_csv_bytes(lc: "LightCurve", cache_key: tuple[str, tuple[int, ...]] | None = None) -> bytes:
     """
     Serialize a (stitched) light curve to CSV bytes: time, flux, and any of
     flux_err / sap_flux / pdcsap_flux / quality that are present.
+
+    cache_key is included in the Streamlit cache signature so callers can
+    invalidate exports when the target or sector set changes.
     """
     time_vals = lc.time.value
     data = {"time_btjd": time_vals, "flux": lc.flux.value}

@@ -1,16 +1,18 @@
-"""
-Target Pixel File (TPF) centroid diagnostic.
+"""Target Pixel File (TPF) centroid diagnostic."""
 
-Downloads the TPF covering a flagged transit window, builds an in-transit
-minus out-of-transit difference image, and overlays Gaia DR3 source positions
-so the user can visually confirm the photometric centroid does not shift onto
-a background/blended star (a classic false-positive signature).
-"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
+import streamlit as st
 import lightkurve as lk
-from astroquery.mast import Catalogs
 from astroquery.gaia import Gaia
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+Gaia.TIMEOUT = 30
 
 
 def download_tpf(tic_id: str, sector: int):
@@ -58,7 +60,13 @@ def build_difference_image(tpf, t0: float, duration_days: float, oot_buffer_days
     }
 
 
-def query_gaia_sources(ra: float, dec: float, radius_arcsec: float = 60.0, mag_limit: float = 18.0):
+@st.cache_data(show_spinner=False)
+def query_gaia_sources(
+    ra: float,
+    dec: float,
+    radius_arcsec: float = 60.0,
+    mag_limit: float = 18.0,
+) -> tuple["pd.DataFrame | None", str | None]:
     """
     Query Gaia DR3 for sources near the target, to overlay on the difference
     image and check whether the eclipse could originate from a blended
@@ -78,9 +86,9 @@ def query_gaia_sources(ra: float, dec: float, radius_arcsec: float = 60.0, mag_l
     try:
         job = Gaia.launch_job(query)
         result = job.get_results()
-        return result.to_pandas()
+        return result.to_pandas(), None
     except Exception as e:
-        return None
+        return None, str(e)
 
 
 def centroid_shift_estimate(diff_image, wcs):

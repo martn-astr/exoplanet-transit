@@ -1,12 +1,17 @@
 """Sector discovery and multi-sector light-curve download / normalization / stitching."""
 
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 import lightkurve as lk
+from astroquery.mast import MastConf
 
 from pht_app.config import CACHE_TTL_SECONDS, SPOC_2MIN_LABEL, FFI_FALLBACK_AUTHORS
 from pht_app.data.lookup import clean_tic_id
+
+MastConf.timeout = 30
 
 
 def _safe_int(value, default):
@@ -29,6 +34,21 @@ def _safe_float(value, default=None):
         return default
 
 
+def _search_lightcurve_with_ui_logs(target: str, logs: list[str] | None = None, **kwargs):
+    """Run a Lightkurve MAST search and surface failures in the UI instead of crashing."""
+    try:
+        return lk.search_lightcurve(target, mission="TESS", **kwargs)
+    except Exception as exc:
+        message = f"MAST light-curve search failed for {target}"
+        if kwargs.get("sector") is not None:
+            message += f" (sector {kwargs['sector']})"
+        message += f": {exc}"
+        if logs is not None:
+            logs.append(message)
+        st.warning(message)
+        return None
+
+
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def search_available_sectors(tic_id: str):
     """
@@ -38,8 +58,8 @@ def search_available_sectors(tic_id: str):
     clean_id = clean_tic_id(tic_id)
     target = f"TIC {clean_id}"
 
-    search_result = lk.search_lightcurve(target, mission="TESS")
-    if len(search_result) == 0:
+    search_result = _search_lightcurve_with_ui_logs(target)
+    if search_result is None or len(search_result) == 0:
         return []
 
     table = search_result.table.to_pandas()
@@ -84,10 +104,10 @@ def _download_one_sector(target: str, sector: int, prefer_source: str, logs: lis
     used_source = None
 
     if prefer_source == SPOC_2MIN_LABEL:
-        sr = lk.search_lightcurve(target, mission="TESS", sector=sector, author="SPOC")
-        if len(sr):
+        sr = _search_lightcurve_with_ui_logs(target, logs, sector=sector, author="SPOC")
+        if sr is not None and len(sr):
             sr = sr[[e <= 200 for e in sr.exptime.value]]
-        if len(sr) > 0:
+        if sr is not None and len(sr) > 0:
             try:
                 lc = sr[0].download()
                 used_source = "SPOC 2-min"
@@ -96,8 +116,8 @@ def _download_one_sector(target: str, sector: int, prefer_source: str, logs: lis
 
     if lc is None:
         for ffi_author in FFI_FALLBACK_AUTHORS:
-            sr = lk.search_lightcurve(target, mission="TESS", sector=sector, author=ffi_author)
-            if len(sr) > 0:
+            sr = _search_lightcurve_with_ui_logs(target, logs, sector=sector, author=ffi_author)
+            if sr is not None and len(sr) > 0:
                 try:
                     lc = sr[0].download()
                     used_source = f"FFI fallback ({ffi_author})"
@@ -138,7 +158,8 @@ def _normalize(lc):
     return lc
 
 
-def download_and_stitch(tic_id: str, sectors: list, prefer_source: str):
+@st.cache_resource(ttl=CACHE_TTL_SECONDS)
+def download_and_stitch(tic_id: str, sectors: tuple[int, ...], prefer_source: str):
     """
     Download the requested sectors (preferring SPOC 2-min, falling back to
     FFI/QLP), normalize each to baseline flux 1.0, and stitch into one
