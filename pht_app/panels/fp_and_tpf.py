@@ -1,7 +1,5 @@
 """False Positive diagnostics + TPF spatial centroid checker (Step 4)."""
 
-from __future__ import annotations
-
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -97,6 +95,15 @@ def render_fp_diagnostics_panel():
     if not period or not epoch:
         st.caption("Set a period/epoch in Panel 2 (or via the single-transit estimator) before running diagnostics.")
         return
+
+    time_vals = lc.time.value
+    n_transits_approx = int(np.floor((time_vals.max() - time_vals.min()) / period)) + 1
+    if n_transits_approx < 6:
+        st.info(
+            f"ℹ Only ~{n_transits_approx} transit(s) fit in the currently loaded baseline for this period. "
+            f"The odd/even and secondary-eclipse tests need several transits on each side to be statistically "
+            f"meaningful — load more sectors if these come back as 'insufficient data'."
+        )
 
     # Default to the BLS-fitted transit duration when available, rather than
     # an arbitrary fixed guess — using the wrong window width is the main
@@ -254,7 +261,7 @@ def render_tpf_centroid_panel():
         with st.spinner("Querying Gaia DR3 for nearby sources..."):
             gaia, gaia_error = query_gaia_sources(diff["ra"], diff["dec"])
         st.session_state.gaia_sources = gaia
-        st.session_state.gaia_query_error = gaia_error
+        st.session_state.gaia_error = gaia_error
 
         st.session_state.centroid_result = centroid_shift_estimate(diff["diff_image"], diff["wcs"])
 
@@ -276,9 +283,6 @@ def render_tpf_centroid_panel():
             ))
 
         gaia = st.session_state.gaia_sources
-        gaia_error = st.session_state.gaia_query_error
-        if gaia_error:
-            st.warning(f"Gaia DR3 query error: {gaia_error}")
         if gaia is not None and len(gaia) > 0 and diff["wcs"] is not None:
             try:
                 px, py = diff["wcs"].world_to_pixel_values(gaia["ra"].values, gaia["dec"].values)
@@ -310,7 +314,11 @@ def render_tpf_centroid_panel():
                 st.write(f"**Difference-image centroid (pixel coords):** x={centroid['x']:.2f}, y={centroid['y']:.2f}")
 
         if gaia is None:
-            st.caption("Gaia DR3 query failed or returned no results (network-restricted environments may block this).")
+            gaia_error = st.session_state.gaia_error
+            if gaia_error:
+                st.caption(f"Gaia DR3 query failed: {gaia_error}")
+            else:
+                st.caption("Gaia DR3 query returned no results.")
         elif len(gaia) == 0:
             st.caption("No Gaia DR3 sources found within the search radius.")
 

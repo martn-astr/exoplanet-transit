@@ -129,8 +129,8 @@ def odd_even_test(lc, period, epoch, duration_days, n_bins=20,
     def _group_depth(parity_mask):
         in_grp = in_transit & parity_mask
         base_grp = local_baseline & parity_mask
-        if in_grp.sum() < 10 or base_grp.sum() < 10:
-            return None
+        if in_grp.sum() < 5 or base_grp.sum() < 5:
+            return None, int(in_grp.sum()), int(base_grp.sum())
         baseline_flux = np.nanmedian(flux_vals[base_grp])
         transit_flux = np.nanmedian(flux_vals[in_grp])
         depth = baseline_flux - transit_flux
@@ -139,13 +139,21 @@ def odd_even_test(lc, period, epoch, duration_days, n_bins=20,
             (np.nanstd(flux_vals[in_grp]) / np.sqrt(in_grp.sum())) ** 2
             + (np.nanstd(flux_vals[base_grp]) / np.sqrt(base_grp.sum())) ** 2
         )
-        return depth, err, int(in_grp.sum())
+        return (depth, err, int(in_grp.sum())), int(in_grp.sum()), int(base_grp.sum())
 
-    odd_result = _group_depth(transit_number % 2 != 0)
-    even_result = _group_depth(transit_number % 2 == 0)
+    odd_result, n_odd_in, n_odd_base = _group_depth(transit_number % 2 != 0)
+    even_result, n_even_in, n_even_base = _group_depth(transit_number % 2 == 0)
 
     if odd_result is None or even_result is None:
-        return {"status": "insufficient_data", "message": "Not enough odd/even transits (with local baseline coverage) in this baseline."}
+        return {
+            "status": "insufficient_data",
+            "message": (
+                f"Not enough odd/even transits to compare: found {n_odd_in} odd-transit and "
+                f"{n_even_in} even-transit point(s) (need ≥5 each, with local baseline coverage). "
+                f"This usually means too few transits fall in the loaded baseline — try loading "
+                f"more sectors, or check that the period/duration are correct."
+            ),
+        }
 
     odd_depth, odd_err, n_odd = odd_result
     even_depth, even_err, n_even = even_result
@@ -191,8 +199,12 @@ def transit_shape_test(lc, period, epoch, duration_days, flatness_threshold=0.65
     half_dur_phase = (duration_days / 2.0) / period
 
     in_transit = np.abs(phase) <= half_dur_phase
-    if in_transit.sum() < 20:
-        return {"status": "insufficient_data", "message": "Not enough in-transit points to assess shape."}
+    if in_transit.sum() < 10:
+        return {
+            "status": "insufficient_data",
+            "message": f"Only {int(in_transit.sum())} in-transit point(s) found (need ≥10) — "
+                       f"try loading more sectors or check the assumed transit duration.",
+        }
 
     t_phase = phase[in_transit]
     t_flux = flux[in_transit]
@@ -201,8 +213,12 @@ def transit_shape_test(lc, period, epoch, duration_days, flatness_threshold=0.65
     core_mask = np.abs(t_phase) <= half_dur_phase * 0.5
     edge_mask = ~core_mask
 
-    if core_mask.sum() < 8 or edge_mask.sum() < 8:
-        return {"status": "insufficient_data", "message": "Not enough resolution across the transit to assess shape."}
+    if core_mask.sum() < 5 or edge_mask.sum() < 5:
+        return {
+            "status": "insufficient_data",
+            "message": f"Not enough resolution across the transit to assess shape "
+                       f"({int(core_mask.sum())} core / {int(edge_mask.sum())} edge points, need ≥5 each).",
+        }
 
     # Robust (percentile-based) depth estimates instead of raw min/max, so a
     # single noisy point can't dominate the statistic.
@@ -250,8 +266,15 @@ def secondary_eclipse_test(lc, period, epoch, duration_days, n_bins=50,
     secondary_mask = np.abs(np.abs(phase) - 0.5) <= half_dur_phase
     baseline_mask = (np.abs(phase) > 3 * half_dur_phase) & (np.abs(np.abs(phase) - 0.5) > 3 * half_dur_phase)
 
-    if secondary_mask.sum() < 10 or baseline_mask.sum() < 20 or primary_mask.sum() < 10:
-        return {"status": "insufficient_data", "message": "Not enough phase coverage near 0.5 to test for a secondary eclipse."}
+    if secondary_mask.sum() < 5 or baseline_mask.sum() < 15 or primary_mask.sum() < 5:
+        return {
+            "status": "insufficient_data",
+            "message": (
+                f"Not enough phase coverage near 0.5 to test for a secondary eclipse "
+                f"({int(secondary_mask.sum())} secondary / {int(primary_mask.sum())} primary / "
+                f"{int(baseline_mask.sum())} baseline points found) — try loading more sectors."
+            ),
+        }
 
     secondary_flux = np.nanmedian(flux[secondary_mask])
     baseline_flux = np.nanmedian(flux[baseline_mask])
