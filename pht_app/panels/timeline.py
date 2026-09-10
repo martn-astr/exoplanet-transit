@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from typing import Tuple
+
 import numpy as np
+import numpy.typing as npt
 import plotly.graph_objects as go
 import streamlit as st
 
 from pht_app.config import FLUX_COLUMNS
+
+# Above this many points, the displayed (not analyzed) trace is decimated —
+# purely a render-speed measure. All analysis (BLS, phase-fold, diagnostics)
+# continues to use the full-resolution light curve; only what's shipped to
+# the browser for this one plot is thinned out.
+DECIMATION_THRESHOLD = 60_000
 
 
 def _flux_series(lc, flux_column):
@@ -52,11 +61,38 @@ def _available_flux_columns(lc, candidates):
     return present if present else ["flux"]
 
 
-def _decimate_for_display(x_vals, y_vals, max_points: int = 60_000):
-    if len(x_vals) <= max_points:
-        return x_vals, y_vals
-    stride = int(np.ceil(len(x_vals) / max_points))
-    return x_vals[::stride], y_vals[::stride]
+def _decimate_for_display(
+    time_vals: npt.NDArray[np.float64],
+    flux_vals: npt.NDArray[np.float64],
+    max_points: int = DECIMATION_THRESHOLD,
+) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], bool]:
+    """Stride-based decimation for plotting only.
+
+    Simple and fast; the tradeoff vs. something like LTTB (Largest-Triangle-
+    Three-Buckets, which preserves peak/dip visual shape better at the same
+    point budget) is deliberate here — plain striding is effectively free,
+    while LTTB costs real CPU on exactly the large-N case where you're
+    trying to save time in the first place. Worth revisiting if decimated
+    plots start visibly clipping short, sharp transit dips between strides.
+
+    Parameters
+    ----------
+    time_vals, flux_vals : ndarray
+        Full-resolution arrays to consider decimating. Must be the same length.
+    max_points : int
+        Decimate only if `len(time_vals)` exceeds this.
+
+    Returns
+    -------
+    tuple[ndarray, ndarray, bool]
+        (possibly-decimated time array, possibly-decimated flux array,
+        whether decimation was actually applied).
+    """
+    n = len(time_vals)
+    if n <= max_points:
+        return time_vals, flux_vals, False
+    stride = int(np.ceil(n / max_points))
+    return time_vals[::stride], flux_vals[::stride], True
 
 
 def render_timeline_panel():
@@ -85,7 +121,6 @@ def render_timeline_panel():
 
     time_vals = lc.time.value
     flux_vals, n_backfilled = _flux_series(lc, flux_col)
-    plot_time_vals, plot_flux_vals = _decimate_for_display(time_vals, flux_vals)
     if n_backfilled:
         pct = 100.0 * n_backfilled / len(flux_vals)
         st.caption(
@@ -94,13 +129,22 @@ def render_timeline_panel():
         )
 
     fig = go.Figure()
+    plot_time, plot_flux, was_decimated = _decimate_for_display(time_vals, flux_vals)
+    if was_decimated:
+        st.caption(
+            f"ℹ Display decimated to {len(plot_time):,} of {len(time_vals):,} points for render speed "
+            f"(all {len(time_vals):,} points are still used for BLS, phase-folding, and diagnostics)."
+        )
     fig.add_trace(go.Scattergl(
-        x=plot_time_vals, y=plot_flux_vals,
+        x=plot_time, y=plot_flux,
         mode="markers", marker=dict(size=3, opacity=0.6),
         name=flux_col,
     ))
 
-    # Overlay predictive transit windows if a single-transit period estimate exists
+    # Overlay predictive transit windows if a single-transit period estimate exists.
+    # Uses the FULL-resolution time_vals for min/max — not the decimated plot
+    # arrays — so the overlay's start/end range is exact, not an artifact of
+    # which points the stride happened to keep.
     est = st.session_state.get("single_transit_estimate")
     if est and est.get("period"):
         t0 = est["t0"]

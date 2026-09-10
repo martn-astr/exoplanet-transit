@@ -1,8 +1,13 @@
-"""Export helpers for stitched-light-curve CSV and PDF summary reports."""
+"""
+Export helpers: CSV of the stitched light curve, and a PDF summary report
+(light curve, phase-fold, periodogram, stellar params, FP diagnostics
+verdict) in the spirit of a TESS SPOC Data Validation report page.
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+build_csv_bytes()/build_pdf_report_bytes() are plain functions with no
+Streamlit dependency and stay unit-testable standalone. build_csv_bytes_cached()
+is the only Streamlit-aware addition (a thin @st.cache_data wrapper) — call
+it from app code instead of build_csv_bytes() directly.
+"""
 
 import io
 import textwrap
@@ -10,24 +15,22 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
-import matplotlib
 import streamlit as st
+import matplotlib
 matplotlib.use("Agg")  # headless backend — required outside a GUI session
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-if TYPE_CHECKING:
-    from lightkurve.lightcurve import LightCurve
 
-
-@st.cache_data(show_spinner=False, hash_funcs={"lightkurve.lightcurve.LightCurve": id})
-def build_csv_bytes(lc: "LightCurve", cache_key: tuple[str, tuple[int, ...]] | None = None) -> bytes:
+def build_csv_bytes(lc) -> bytes:
     """
     Serialize a (stitched) light curve to CSV bytes: time, flux, and any of
     flux_err / sap_flux / pdcsap_flux / quality that are present.
 
-    cache_key is included in the Streamlit cache signature so callers can
-    invalidate exports when the target or sector set changes.
+    Kept as a plain, undecorated function so it stays unit-testable without
+    a Streamlit runtime — use build_csv_bytes_cached() from app code instead
+    of calling this directly, so repeated reruns don't re-serialize the same
+    light curve on every widget interaction.
     """
     time_vals = lc.time.value
     data = {"time_btjd": time_vals, "flux": lc.flux.value}
@@ -41,6 +44,27 @@ def build_csv_bytes(lc: "LightCurve", cache_key: tuple[str, tuple[int, ...]] | N
     buf = io.StringIO()
     df.to_csv(buf, index=False)
     return buf.getvalue().encode("utf-8")
+
+
+@st.cache_data(show_spinner=False)
+def build_csv_bytes_cached(_lc, cache_key: tuple) -> bytes:
+    """
+    Memoized wrapper around build_csv_bytes.
+
+    The `_lc` parameter is intentionally prefixed with an underscore, which
+    tells st.cache_data to skip hashing it entirely rather than trying to
+    hash the LightCurve object itself. That's a deliberate choice, not a
+    workaround: real downloaded/stitched TESS data comes back as
+    `lightkurve.lightcurve.TessLightCurve` (a LightCurve subclass), and
+    st.cache_data's `hash_funcs` matches by *exact* type — a hash_funcs entry
+    registered for the base `LightCurve` class silently does NOT match
+    `TessLightCurve` instances (confirmed by testing both), so that approach
+    would work in a synthetic test against a bare `LightCurve` but crash on
+    every real target. Skipping the hash and relying entirely on the
+    explicit, caller-supplied `cache_key` (e.g.
+    (tic_id, tuple(sorted(sectors)))) sidesteps that fragility altogether.
+    """
+    return build_csv_bytes(_lc)
 
 
 def _fmt(value, fmt="{:.3f}", default="—"):
