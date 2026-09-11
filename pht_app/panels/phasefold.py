@@ -1,10 +1,9 @@
 """Panel 2 (middle): light curve folded on a period and epoch (T0)."""
 
-import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
-from pht_app.data.analysis import phase_fold
+from pht_app.data.analysis import phase_fold, bin_by_x
 
 
 def render_phasefold_panel():
@@ -40,14 +39,7 @@ def render_phasefold_panel():
     ))
 
     if bin_toggle and len(phase) > 20:
-        n_bins = 100
-        bin_edges = np.linspace(-0.5, 0.5, n_bins + 1)
-        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        bin_means = np.full(n_bins, np.nan)
-        for i in range(n_bins):
-            mask = (phase >= bin_edges[i]) & (phase < bin_edges[i + 1])
-            if mask.any():
-                bin_means[i] = np.nanmean(flux[mask])
+        bin_centers, bin_means = bin_by_x(phase, flux, -0.5, 0.5, n_bins=100)
         fig.add_trace(go.Scatter(
             x=bin_centers, y=bin_means, mode="lines+markers",
             line=dict(color="darkorange", width=2),

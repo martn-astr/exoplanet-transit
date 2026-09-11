@@ -107,6 +107,28 @@ def init_session_state(st) -> None:
             st.session_state[key] = _default_for(key)
 
 
+def _clear_dynamic_sector_checkboxes(st) -> None:
+    """Clear ad-hoc `sector_<N>` checkbox keys from session_state.
+
+    These keys are created dynamically by the sidebar (one per sector
+    number, e.g. "sector_14") and are NOT part of SESSION_DEFAULTS, so
+    reset_for_new_target()'s normal key-by-key reset never touches them.
+    Left alone, they leak across different targets: if TIC A had sector 14
+    and the user deselected it, then a NEW target TIC B also has a sector
+    numbered 14, the checkbox would silently start pre-deselected for B too
+    — not because of anything about B's data, just because the key number
+    happens to match. Only called from reset_for_new_target(), not from
+    reset_for_sector_reload() (same target — the user's current checkbox
+    selections should survive a sector reload, not get wiped).
+    """
+    stale_keys = [
+        key for key in list(st.session_state.keys())
+        if key.startswith("sector_") and key[len("sector_"):].isdigit()
+    ]
+    for key in stale_keys:
+        del st.session_state[key]
+
+
 def reset_for_new_target(st) -> None:
     """Call when the user searches a new TIC ID.
 
@@ -115,10 +137,14 @@ def reset_for_new_target(st) -> None:
     masks, single-transit estimate, prepared PDF export, etc.) — all of it
     was computed against a light curve that's about to be replaced, so
     leaving it in session_state would render stale results against the new
-    target.
+    target. Also clears dynamic per-sector checkbox state (see
+    _clear_dynamic_sector_checkboxes) so a coincidentally-matching sector
+    number from the previous target can't leak its selection state into
+    the new one.
     """
     for key in _TARGET_SCOPED_KEYS + _ANALYSIS_SCOPED_KEYS:
         st.session_state[key] = _default_for(key)
+    _clear_dynamic_sector_checkboxes(st)
 
 
 def reset_for_sector_reload(st) -> None:

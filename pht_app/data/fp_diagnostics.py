@@ -16,7 +16,7 @@ transits from eclipsing-binary (EB) false positives:
 
 import numpy as np
 
-from pht_app.data.analysis import phase_fold
+from pht_app.data.analysis import phase_fold, bin_by_x
 
 
 def odd_even_folded_curves(lc, period, epoch, duration_days, window_factor=3.0, n_bins=40):
@@ -42,22 +42,19 @@ def odd_even_folded_curves(lc, period, epoch, duration_days, window_factor=3.0, 
     if odd_mask.sum() < 5 or even_mask.sum() < 5:
         return {"status": "insufficient_data"}
 
-    bin_edges = np.linspace(-half_window, half_window, n_bins + 1)
-    bin_centers_hours = 0.5 * (bin_edges[:-1] + bin_edges[1:]) * 24.0
-
-    def _bin(mask):
-        means = np.full(n_bins, np.nan)
-        for i in range(n_bins):
-            sel = mask & (phase_days >= bin_edges[i]) & (phase_days < bin_edges[i + 1])
-            if sel.any():
-                means[i] = np.nanmean(flux_vals[sel])
-        return means
+    bin_centers_hours, odd_flux = bin_by_x(
+        phase_days[odd_mask], flux_vals[odd_mask], -half_window, half_window, n_bins
+    )
+    _, even_flux = bin_by_x(
+        phase_days[even_mask], flux_vals[even_mask], -half_window, half_window, n_bins
+    )
+    bin_centers_hours = bin_centers_hours * 24.0
 
     return {
         "status": "ok",
         "phase_hours": bin_centers_hours,
-        "odd_flux": _bin(odd_mask),
-        "even_flux": _bin(even_mask),
+        "odd_flux": odd_flux,
+        "even_flux": even_flux,
     }
 
 
@@ -76,13 +73,7 @@ def secondary_zoom_curves(lc, period, epoch, duration_days, window_factor=3.0, n
         near = np.abs(rel_phase) <= half_window
         if near.sum() < 10:
             return None
-        bin_edges = np.linspace(-half_window, half_window, n_bins + 1)
-        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-        means = np.full(n_bins, np.nan)
-        for i in range(n_bins):
-            sel = near & (rel_phase >= bin_edges[i]) & (rel_phase < bin_edges[i + 1])
-            if sel.any():
-                means[i] = np.nanmean(flux[sel])
+        bin_centers, means = bin_by_x(rel_phase[near], flux[near], -half_window, half_window, n_bins)
         return {"phase": bin_centers, "flux": means}
 
     primary = _zoom(0.0)

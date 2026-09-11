@@ -17,9 +17,20 @@ def clean_tic_id(tic_id: str) -> str:
 
 @st.cache_data(show_spinner=False, ttl=CACHE_TTL_SECONDS)
 def resolve_tic(tic_id: str):
-    """Look up stellar parameters for a TIC ID via the MAST TIC catalog."""
+    """Look up stellar parameters for a TIC ID via the MAST TIC catalog.
+
+    Returns None both when the TIC ID doesn't resolve to anything AND when
+    the MAST query itself fails (network error, timeout, service outage) —
+    callers already treat a None return as "show an error", so a failed
+    query degrades the same way an empty result does, instead of raising
+    an uncaught exception that would crash the whole Streamlit run on the
+    very first search of a session.
+    """
     clean_id = clean_tic_id(tic_id)
-    result = Catalogs.query_criteria(catalog="Tic", ID=clean_id)
+    try:
+        result = Catalogs.query_criteria(catalog="Tic", ID=clean_id)
+    except Exception:
+        return None
     if len(result) == 0:
         return None
 
