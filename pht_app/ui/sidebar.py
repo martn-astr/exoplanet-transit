@@ -145,20 +145,28 @@ def render_sidebar():
                             st.session_state.centroid_result, sp.get("ra"), sp.get("dec")
                         )
 
-                    with st.spinner("Building PDF report..."):
-                        st.session_state.pdf_export_bytes = build_pdf_report_bytes(
-                            tic_id=tic_id,
-                            stellar_params=st.session_state.stellar_params,
-                            exofop_flags=st.session_state.exofop_flags,
-                            lc=lc,
-                            flux_column=st.session_state.flux_column,
-                            fold_period=st.session_state.fold_period,
-                            fold_epoch=st.session_state.fold_epoch,
-                            bls_result=st.session_state.bls_result,
-                            fp_result=st.session_state.fp_diagnostics_result,
-                            duration_days=duration_days,
-                            centroid_offset=centroid_offset,
-                        )
+                    try:
+                        with st.spinner("Building PDF report..."):
+                            st.session_state.pdf_export_bytes = build_pdf_report_bytes(
+                                tic_id=tic_id,
+                                stellar_params=st.session_state.stellar_params,
+                                exofop_flags=st.session_state.exofop_flags,
+                                lc=lc,
+                                flux_column=st.session_state.flux_column,
+                                fold_period=st.session_state.fold_period,
+                                fold_epoch=st.session_state.fold_epoch,
+                                bls_result=st.session_state.bls_result,
+                                fp_result=st.session_state.fp_diagnostics_result,
+                                duration_days=duration_days,
+                                centroid_offset=centroid_offset,
+                            )
+                    except Exception as e:
+                        # PDF generation touches a lot of optional, possibly-partial
+                        # session state (BLS results, FP diagnostics, TPF centroid) —
+                        # a malformed or unexpected combination should degrade to a
+                        # visible error message, not crash the whole Streamlit run.
+                        st.error(f"Could not build the PDF report: {type(e).__name__}: {e}")
+                        st.session_state.pdf_export_bytes = None
 
             if st.session_state.get("pdf_export_bytes"):
                 st.download_button(

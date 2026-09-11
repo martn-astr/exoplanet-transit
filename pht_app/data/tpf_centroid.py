@@ -158,6 +158,20 @@ def query_gaia_sources(
         connection error, malformed query, etc.) so the caller can surface
         the actual reason instead of a generic "query failed" message.
     """
+    # Explicit float() coercion before string-formatting into the ADQL query.
+    # Python type hints aren't enforced at runtime — nothing stops a caller
+    # from passing a string here — so without this, a value like
+    # `ra="0 OR 1=1; --"` would be interpolated verbatim into a live query
+    # instead of raising immediately. Every current call site already passes
+    # real floats, so this changes no observed behavior; it's defense in
+    # depth against a future call site (or a bug elsewhere) passing through
+    # unvalidated input, and it fails fast with a clear TypeError/ValueError
+    # instead of silently building a malformed or malicious query.
+    ra = float(ra)
+    dec = float(dec)
+    radius_arcsec = float(radius_arcsec)
+    mag_limit = float(mag_limit)
+
     radius_deg = radius_arcsec / 3600.0
     query = f"""
     SELECT source_id, ra, dec, phot_g_mean_mag

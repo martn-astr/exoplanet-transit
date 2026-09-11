@@ -106,7 +106,7 @@ def build_pdf_report_bytes(
       Row 5: odd/even transit-shape comparison          | TIC position centroid offset
       Row 6: Fit Results / Diagnostic Results text blocks
     """
-    from pht_app.data.analysis import phase_fold
+    from pht_app.data.analysis import phase_fold, bin_by_x
 
     buf = io.BytesIO()
     sp = stellar_params or {}
@@ -179,15 +179,9 @@ def build_pdf_report_bytes(
             phase, flux, _ = phase_fold(lc, fold_period, fold_epoch)
             ax_fold_days.scatter(phase, flux - 1.0, s=1.5, alpha=0.35, color="black")
 
-            bin_edges = np.linspace(-0.5, 0.5, 101)
-            bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-            binned = np.full(100, np.nan)
-            for i in range(100):
-                sel = (phase >= bin_edges[i]) & (phase < bin_edges[i + 1])
-                if sel.any():
-                    binned[i] = np.nanmean(flux[sel]) - 1.0
+            bin_centers, binned = bin_by_x(phase, flux - 1.0, -0.5, 0.5, n_bins=100)
             ax_fold_days.plot(bin_centers, binned, color="cyan", linewidth=1.2)
-            ax_fold_days.set_xlabel("Phase [Days]" if False else "Phase")
+            ax_fold_days.set_xlabel("Phase")
             ax_fold_days.set_ylabel("Relative Flux")
             ax_fold_days.set_title(f"Phase-Folded (P = {fold_period:.5f} d)", fontsize=10, pad=10)
 
@@ -219,13 +213,9 @@ def build_pdf_report_bytes(
             near = np.abs(phase_hours) <= zoom_hw
             ax_fold_hours.scatter(phase_hours[near], flux[near] - 1.0, s=2, alpha=0.35, color="black")
 
-            bin_edges_h = np.linspace(-zoom_hw, zoom_hw, 41)
-            bin_centers_h = 0.5 * (bin_edges_h[:-1] + bin_edges_h[1:])
-            binned_h = np.full(40, np.nan)
-            for i in range(40):
-                sel = near & (phase_hours >= bin_edges_h[i]) & (phase_hours < bin_edges_h[i + 1])
-                if sel.any():
-                    binned_h[i] = np.nanmean(flux[sel]) - 1.0
+            bin_centers_h, binned_h = bin_by_x(
+                phase_hours[near], flux[near] - 1.0, -zoom_hw, zoom_hw, n_bins=40
+            )
             ax_fold_hours.plot(bin_centers_h, binned_h, color="red", linewidth=1.5)
             ax_fold_hours.set_xlabel("Phase [Hours]")
             ax_fold_hours.set_ylabel("Relative Flux")

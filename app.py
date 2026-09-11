@@ -103,14 +103,22 @@ if actions["load_clicked"]:
                 st.session_state.fold_epoch = auto_bls["best_t0"]
 
 if actions["add_mask"]:
-    st.session_state.signal_masks.append({
-        "period": actions["mask_period"],
-        "epoch": actions["mask_epoch"],
-        "duration_days": 0.2,
-    })
-    st.session_state.bls_result = None
-    st.session_state.ls_result = None
-    st.rerun()
+    new_period, new_epoch = actions["mask_period"], actions["mask_epoch"]
+    is_duplicate = any(
+        abs(m["period"] - new_period) < 1e-6 and abs(m["epoch"] - new_epoch) < 1e-6
+        for m in st.session_state.signal_masks
+    )
+    if is_duplicate:
+        st.toast(f"A mask for P={new_period:.4f}d, T0={new_epoch:.4f} already exists — not adding a duplicate.")
+    else:
+        st.session_state.signal_masks.append({
+            "period": new_period,
+            "epoch": new_epoch,
+            "duration_days": 0.2,
+        })
+        st.session_state.bls_result = None
+        st.session_state.ls_result = None
+        st.rerun()
 
 # --------------------------------------------------------------------------
 # Header
